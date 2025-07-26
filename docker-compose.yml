@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  api_gateway:
+    build:
+      context: ./api_gateway
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./api_gateway:/app
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s # Aumentato da 20s a 30s (o anche di più se necessario)
+    depends_on:
+      ssh_node:
+        condition: service_healthy
+
+  ssh_node: # NUOVO SERVIZIO: Il container che fa da server SSH e nodo Docker
+    build:
+      context: ./ssh_node
+      dockerfile: Dockerfile
+    ports:
+      - "2222:22" # Mappa la porta 22 del container alla porta 2222 del tuo host (opzionale, per debug)
+    volumes:
+      # !!! IMPORTANTE: Monta il socket Docker dell'host nel container !!!
+      # Questo permette al container 'ssh_node' di eseguire comandi Docker sul daemon dell'host.
+      # È un POTENZIALE RISCHIO DI SICUREZZA: se il container viene compromesso,
+      # l'attaccante ha accesso root al tuo daemon Docker sull'host.
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: always
+    healthcheck: # Healthcheck per il nodo SSH
+      test: ["CMD", "sshpass", "-p", "sshpassword", "ssh", "-o", "StrictHostKeyChecking=no", "sshuser@localhost", "exit"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s # Dà più tempo per l'avvio di SSH e la configurazione
+
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    volumes:
+      - ./client:/app
+    depends_on:
+      api_gateway:
+        condition: service_healthy # Il client dipende dal gateway
+    # restart: "no" # Il client dovrebbe eseguire i test una volta e poi terminare
