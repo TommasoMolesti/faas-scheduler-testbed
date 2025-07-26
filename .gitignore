@@ -1,0 +1,56 @@
+# Python specific
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+bin/
+include/
+lib/
+lib64/
+share/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.cache
+.pytest_cache/
+htmlcov/
+.ipynb_checkpoints/
+.mypy_cache/
+
+# IDE specific (Visual Studio Code, PyCharm, etc.)
+.vscode/        # Se non vuoi condividere le tue impostazioni VS Code specifiche
+.idea/          # PyCharm
+*.iml           # IntelliJ IDEA / PyCharm
+*.ipr
+*.iws
+
+# Docker specific
+# I file .dockerignore gestiscono cosa Docker ignora quando costruisce l'immagine.
+# Ma in .gitignore puoi comunque voler ignorare alcuni file Docker-related
+# che sono solo locali o generati.
+docker-compose.override.yml # Utile per configurazioni locali che non vanno in produzione
+*.env           # File con variabili d'ambiente (es. .env, .env.development) - Molto importante per la sicurezza!
+
+# Database
+*.sqlite3       # Database SQLite (se usato)
+
+# Logs
+*.log
+logs/
+
+# Operating System specific
+.DS_Store       # macOS
+.Trashes        # macOS
+Thumbs.db       # Windows
+ehthumbs.db     # Windows
+Desktop.ini     # Windows
+
+# Backup files
+*~
+*.bak
+*.swp
