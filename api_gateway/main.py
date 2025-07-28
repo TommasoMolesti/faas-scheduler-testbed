@@ -124,6 +124,7 @@ def invoke_function(function_name: str, req: InvokeFunctionRequest):
         raise HTTPException(status_code=503, detail="Nessun nodo disponibile per l'esecuzione.")
 
     node_name = node_selection_policy.select_node(node_registry, function_name)
+    print(f"Nodo logico {node_name} ha invocato {function_name}")
     if not node_name or node_name not in node_registry:
         raise HTTPException(status_code=503, detail="Nessun nodo idoneo trovato o il nodo selezionato non è valido.")
 

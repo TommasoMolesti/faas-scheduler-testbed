@@ -66,7 +66,7 @@ def nodes_count():
     try:
         response = requests.get(url)
         response.raise_for_status()
-        print(f"\nNodi registrati ({response.json()})")
+        print(f"\nNodi logici registrati ({response.json()})")
     except requests.exceptions.RequestException as err:
         print(f"Errore durante il recupero dei nodi: {err}")
 
@@ -90,8 +90,8 @@ def invoke_function(function_name: str, input_data: Optional[Any] = None):
 if __name__ == "__main__":
     print("\n--- SSH ---")
     print(f"\nNodi SSH presenti : {len(SSH_NODE_SERVICE_NAMES)}")
-    
-    print("\n--- Registrazione Nodi Logici ---")
+
+    print("\n--- Registrazione Nodi logici ---")
     for i in range(1, NUM_NODES + 1):
         service_name = SSH_NODE_SERVICE_NAMES[(i - 1) % len(SSH_NODE_SERVICE_NAMES)]
         print(f"node-{i+1} {service_name}")
