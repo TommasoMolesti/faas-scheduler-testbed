@@ -4,6 +4,12 @@ import time
 from typing import Optional, Any
 
 BASE_URL = "http://api_gateway:8000"
+DOCKER_IMAGE = "busybox"
+COMMAND = "/bin/sh -c 'echo Hello world from Busybox!'"
+NUM_NODES = 5
+NUM_FUNCTIONS = 10
+USER = "sshuser"
+PASSWORD = "sshpassword"
 
 def register_function(name: str, docker_image: str):
     """Registra una funzione sul gateway."""
@@ -12,7 +18,6 @@ def register_function(name: str, docker_image: str):
     try:
         response = requests.post(url, json=payload)
         response.raise_for_status()
-        print(f"Funzione registrata: {response.json()}")
     except requests.exceptions.HTTPError as err:
         print(f"Errore HTTP durante la registrazione della funzione: {err}")
         print(f"Dettagli: {err.response.json()}")
@@ -21,18 +26,16 @@ def register_function(name: str, docker_image: str):
     except Exception as err:
         print(f"Si è verificato un errore inatteso: {err}")
 
-def list_functions():
-    """Elenca tutte le funzioni registrate."""
-    url = f"{BASE_URL}/functions"
+def functions_count():
+    url = f"{BASE_URL}/functions_count"
     try:
         response = requests.get(url)
         response.raise_for_status()
-        print(f"\nFunzioni registrate: {response.json()}")
+        print(f"\nFunzioni registrate ({response.json()})")
     except requests.exceptions.RequestException as err:
         print(f"Errore durante il recupero delle funzioni: {err}")
 
 def register_node(name: str, host: str, username: str, password: str, port: int = 22):
-    """Registra un nodo sul gateway."""
     url = f"{BASE_URL}/nodes/register"
     payload = {
         "name": name,
@@ -44,7 +47,6 @@ def register_node(name: str, host: str, username: str, password: str, port: int 
     try:
         response = requests.post(url, json=payload)
         response.raise_for_status()
-        print(f"Nodo registrato: {response.json()}")
     except requests.exceptions.HTTPError as err:
         print(f"Errore HTTP durante la registrazione del nodo: {err}")
         print(f"Dettagli: {err.response.json()}")
@@ -53,13 +55,12 @@ def register_node(name: str, host: str, username: str, password: str, port: int 
     except Exception as err:
         print(f"Si è verificato un errore inatteso: {err}")
 
-def list_nodes():
-    """Elenca tutti i nodi registrati."""
-    url = f"{BASE_URL}/nodes"
+def nodes_count():
+    url = f"{BASE_URL}/nodes_count"
     try:
         response = requests.get(url)
         response.raise_for_status()
-        print(f"\nNodi registrati: {response.json()}")
+        print(f"\nNodi registrati ({response.json()})")
     except requests.exceptions.RequestException as err:
         print(f"Errore durante il recupero dei nodi: {err}")
 
@@ -81,28 +82,23 @@ def invoke_function(function_name: str, input_data: Optional[Any] = None):
         print(f"Si è verificato un errore inatteso durante l'invocazione: {err}")
 
 if __name__ == "__main__":
-    # --- Registrazione Nodi ---
     print("\n--- Registrazione Nodi ---")
-    register_node("my-local-node", "ssh_node", "sshuser", "sshpassword")
-    # Un eventuale secondo nodo
-    # register_node("another-node", "ANOTHER_SSH_HOST", "ANOTHER_SSH_USERNAME", "ANOTHER_SSH_PASSWORD")
+    for i in range(1, NUM_NODES + 1):
+        register_node(f"node-{i}", "ssh_node", USER, PASSWORD)
+    nodes_count()
 
-    list_nodes()
-
-    # --- Registrazione Funzioni ---
     print("\n--- Registrazione Funzioni ---")
-    register_function("hello_world_ubuntu", "ubuntu:latest") # Questa immagine potrebbe non avere un entrypoint di default che produce output visibile facilmente
-    register_function("hello_world_alpine", "alpine/git") # Un'altra immagine di base
 
-    list_functions()
+    for i in range(1, NUM_FUNCTIONS + 1):
+        register_function(f"func-{i}", f"{DOCKER_IMAGE} {COMMAND}")
 
-    # Breve pausa per assicurarsi che le registrazioni siano elaborate dal server
+    functions_count()
+
     time.sleep(1)
 
-    # --- Invocazione Funzioni ---
     print("\n--- Invocazione Funzioni ---")
 
-    invoke_function("hello_world_ubuntu")
-    invoke_function("hello_world_alpine")
+    for i in range(1, NUM_FUNCTIONS + 1):
+        invoke_function(f"func-{i}")
 
-    print("\nScript client completato.")
+    print("\n--- Script client completato ---")
