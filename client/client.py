@@ -94,8 +94,8 @@ if __name__ == "__main__":
     print("\n--- Registrazione Nodi logici ---")
     for i in range(1, NUM_NODES + 1):
         service_name = SSH_NODE_SERVICE_NAMES[(i - 1) % len(SSH_NODE_SERVICE_NAMES)]
-        print(f"node-{i+1} {service_name}")
-        register_node(f"node-{i+1}", service_name, USER, PASSWORD)
+        print(f"node-{i} {service_name}")
+        register_node(f"node-{i}", service_name, USER, PASSWORD)
     nodes_count()
 
     print("\n--- Registrazione Funzioni ---")

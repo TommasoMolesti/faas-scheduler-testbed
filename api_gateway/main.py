@@ -51,7 +51,6 @@ node_selection_policy = RoundRobinNodeSelectionPolicy()
 def _run_docker_on_node(node_info: Dict[str, Any], docker_image: str) -> str:
     """
     Si connette a un nodo via SSH ed esegue un'immagine Docker.
-    Restituisce l'output dello stdout del comando docker run.
     """
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
