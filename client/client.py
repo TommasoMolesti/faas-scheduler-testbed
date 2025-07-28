@@ -6,10 +6,16 @@ from typing import Optional, Any
 BASE_URL = "http://api_gateway:8000"
 DOCKER_IMAGE = "busybox"
 COMMAND = "/bin/sh -c 'echo Hello world from Busybox!'"
-NUM_NODES = 5
-NUM_FUNCTIONS = 10
+NUM_NODES = 10
+NUM_FUNCTIONS = 20
 USER = "sshuser"
 PASSWORD = "sshpassword"
+SSH_NODE_SERVICE_NAMES = [
+    "ssh_node_1",
+    "ssh_node_2",
+    "ssh_node_3",
+    "ssh_node_4"
+]
 
 def register_function(name: str, docker_image: str):
     """Registra una funzione sul gateway."""
@@ -82,9 +88,14 @@ def invoke_function(function_name: str, input_data: Optional[Any] = None):
         print(f"Si è verificato un errore inatteso durante l'invocazione: {err}")
 
 if __name__ == "__main__":
-    print("\n--- Registrazione Nodi ---")
+    print("\n--- SSH ---")
+    print(f"\nNodi SSH presenti : {len(SSH_NODE_SERVICE_NAMES)}")
+    
+    print("\n--- Registrazione Nodi Logici ---")
     for i in range(1, NUM_NODES + 1):
-        register_node(f"node-{i}", "ssh_node", USER, PASSWORD)
+        service_name = SSH_NODE_SERVICE_NAMES[(i - 1) % len(SSH_NODE_SERVICE_NAMES)]
+        print(f"node-{i+1} {service_name}")
+        register_node(f"node-{i+1}", service_name, USER, PASSWORD)
     nodes_count()
 
     print("\n--- Registrazione Funzioni ---")
