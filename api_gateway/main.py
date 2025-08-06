@@ -7,6 +7,7 @@ import itertools
 import os
 import pandas as pd
 from tabulate import tabulate
+import time
 
 app = FastAPI(
     title="FaaS Gateway",
@@ -143,45 +144,59 @@ class LeastUsedNodeSelectionPolicy(NodeSelectionPolicy):
     Politica di selezione del nodo Least Used.
     Seleziona il nodo con il carico medio più basso.
     """
+    def __init__(self):
+        self._node_metrics_cache: Dict[str, Dict[str, Any]] = {}
+        self._cache_last_updated: float = 0.0
+        self._cache_ttl = 1 # 1 secondo di TTL nella cache
+
+    def _update_metrics_cache(self, nodes: Dict[str, Dict[str, Any]]):
+        """Funzione helper per aggiornare le metriche di tutti i nodi."""
+        for node_name, node_info in nodes.items():
+            try:
+                metrics_json_str = _run_ssh_command(node_info, "/usr/local/bin/get_node_metrics.sh")
+                metrics = json.loads(metrics_json_str)
+                self._node_metrics_cache[node_name] = {
+                    "cpu_usage": float(metrics.get("cpu_usage", float('inf'))),
+                    "ram_usage": float(metrics.get("ram_usage", float('inf'))),
+                }
+            except Exception as e:
+                print(f"  Errore nel recupero metriche per '{node_name}': {e}. Ignorato.")
+                if node_name in self._node_metrics_cache:
+                    del self._node_metrics_cache[node_name]
+        
+        self._cache_last_updated = time.time()
+
     def select_node(self, nodes: Dict[str, Dict[str, Any]], function_name: str) -> Optional[str]:
         if not nodes:
             return None
 
-        min_load = float('inf')
-        selected_node = None
-
-        # Prende il load_average di tutti i nodi e salva il nodo con quello più piccolo
-        for node_name, node_info in nodes.items():
-            try:
-                # Esegue lo script get_node_metrics.sh sul nodo SSH
-                metrics_json_str = _run_ssh_command(node_info, "/usr/local/bin/get_node_metrics.sh")
-                metrics = json.loads(metrics_json_str)
-
-                cpu_usage = float(metrics.get("cpu_usage", float('inf')))
-                ram_usage = float(metrics.get("ram_usage", float('inf')))
-
-                current_load = (cpu_usage + ram_usage) / 2
-
-                if current_load < min_load:
-                    min_load = current_load
-                    selected_node = node_name
-            except Exception as e:
-                print(f"  Errore nel recupero metriche per il nodo '{node_name}': {e}. Questo nodo verrà ignorato.")
-
-        if not selected_node:
-            print("Least Used: Nessun nodo idoneo trovato (o tutti i nodi non sono raggiungibili).")
+        if (time.time() - self._cache_last_updated) > self._cache_ttl:
+            self._update_metrics_cache(nodes)
+        
+        if not self._node_metrics_cache:
+            print("Least Used: Cache delle metriche vuota, nessun nodo selezionabile.")
             return None
 
-        metrics_data = {
-            "Function": function_name,
-            "Node": selected_node,
-            "CPU Usage % ": cpu_usage,
-            "RAM Usage %": ram_usage,
-            "Policy": "Least Used"
-        }
-
-        write_metrics_to_csv(metrics_data)
-
+        min_load = float('inf')
+        selected_node = None
+        
+        # Sceglie il nodo basandosi sulla cache
+        for node_name, metrics in self._node_metrics_cache.items():
+            current_load = (metrics["cpu_usage"] + metrics["ram_usage"]) / 2
+            if current_load < min_load:
+                min_load = current_load
+                selected_node = node_name
+        
+        if selected_node:
+            metrics_data = {
+                "Function": function_name,
+                "Node": selected_node,
+                "CPU Usage % ": self._node_metrics_cache[selected_node]['cpu_usage'],
+                "RAM Usage %": self._node_metrics_cache[selected_node]['ram_usage'],
+                "Policy": "Least Used (Cached)"
+            }
+            write_metrics_to_csv(metrics_data)
+        
         return selected_node
 
 def write_metrics_to_csv(metrics_data: Dict[str, Any], filename: str = "metrics.csv"):
