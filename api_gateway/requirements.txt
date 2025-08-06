@@ -1,5 +1,5 @@
 fastapi
 uvicorn
-paramiko
 pandas
 tabulate
+asyncssh

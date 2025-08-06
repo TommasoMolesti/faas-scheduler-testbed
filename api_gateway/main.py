@@ -1,13 +1,14 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional, List
-import paramiko
 import json
 import itertools
 import os
 import pandas as pd
 from tabulate import tabulate
 import time
+import asyncio
+import asyncssh
 
 app = FastAPI(
     title="FaaS Gateway",
@@ -32,69 +33,32 @@ class InvokeFunctionRequest(BaseModel):
     input: Optional[Any] = None
     policy_name: str = Field("round_robin", description="Nome della politica di scheduling da utilizzare (es. 'round_robin', 'least_loaded').")
 
-def _run_ssh_command(node_info: Dict[str, Any], command: str) -> str:
+async def _run_ssh_command_async(node_info: Dict[str, Any], command: str) -> str:
     """
-    Si connette a un nodo via SSH ed esegue un comando arbitrario.
-    Restituisce l'output dello stdout del comando.
+    Si connette a un nodo via SSH in modo asincrono ed esegue un comando.
     """
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
-        client.connect(
-            hostname=node_info["host"],
+        async with asyncssh.connect(
+            host=node_info["host"],
             port=node_info["port"],
             username=node_info["username"],
             password=node_info["password"],
-            timeout=5
-        )
-        _stdin, stdout, stderr = client.exec_command(command)
-
-        output = stdout.read().decode().strip()
-        error = stderr.read().decode().strip()
-
-        if error:
-            raise Exception(f"Errore SSH durante l'esecuzione del comando '{command}': {error}")
-        return output
-    except paramiko.AuthenticationException:
-        raise Exception("Autenticazione SSH fallita. Controlla username/password.")
-    except paramiko.SSHException as e:
-        raise Exception(f"Impossibile stabilire la connessione SSH: {e}")
+            known_hosts=None
+        ) as conn:
+            result = await conn.run(command, check=True)
+            return result.stdout.strip()
+    except asyncssh.Error as e:
+        raise Exception(f"Errore SSH o del comando sul nodo '{node_info['host']}': {e}")
     except Exception as e:
-        raise Exception(f"Si è verificato un errore inatteso durante l'esecuzione SSH: {e}")
-    finally:
-        client.close()
+        raise Exception(f"Errore inatteso durante l'esecuzione SSH asincrona: {e}")
 
-def _run_docker_on_node(node_info: Dict[str, Any], docker_image: str) -> str:
+
+async def _run_docker_on_node_async(node_info: Dict[str, Any], docker_image: str) -> str:
     """
-    Si connette a un nodo via SSH ed esegue un'immagine Docker.
+    Esegue un'immagine Docker su un nodo via SSH in modo asincrono.
     """
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    try:
-        client.connect(
-            hostname=node_info["host"],
-            port=node_info["port"],
-            username=node_info["username"],
-            password=node_info["password"],
-            timeout=10
-        )
-        docker_cmd = f"sudo docker run --rm {docker_image}"
-        _stdin, stdout, stderr = client.exec_command(docker_cmd)
-
-        output = stdout.read().decode().strip()
-        error = stderr.read().decode().strip()
-
-        if error:
-            raise Exception(f"Errore del comando Docker sul nodo: {error}")
-        return output
-    except paramiko.AuthenticationException:
-        raise Exception("Autenticazione SSH fallita. Controlla username/password.")
-    except paramiko.SSHException as e:
-        raise Exception(f"Impossibile stabilire la connessione SSH: {e}")
-    except Exception as e:
-        raise Exception(f"Si è verificato un errore inatteso durante l'esecuzione Docker: {e}")
-    finally:
-        client.close()
+    docker_cmd = f"sudo docker run --rm {docker_image}"
+    return await _run_ssh_command_async(node_info, docker_cmd)
 
 class NodeSelectionPolicy:
     """
@@ -102,7 +66,7 @@ class NodeSelectionPolicy:
     Sovrascrivi 'select_node' per politiche personalizzate.
     Politica di default: sceglie il primo disponibile
     """
-    def select_node(self, nodes: Dict[str, Dict[str, Any]], function_name: str) -> Optional[str]:
+    async def select_node(self, nodes: Dict[str, Dict[str, Any]], function_name: str) -> Optional[str]:
         return next(iter(nodes.keys())) if nodes else None
 
 class RoundRobinNodeSelectionPolicy(NodeSelectionPolicy):
@@ -114,7 +78,7 @@ class RoundRobinNodeSelectionPolicy(NodeSelectionPolicy):
         self.node_iterator = itertools.cycle([])
         self._nodes_cache = []
 
-    def select_node(self, nodes: Dict[str, Dict[str, Any]], function_name: str) -> Optional[str]:
+    async def select_node(self, nodes: Dict[str, Dict[str, Any]], function_name: str) -> Optional[str]:
         if not nodes:
             return None
 
@@ -147,31 +111,41 @@ class LeastUsedNodeSelectionPolicy(NodeSelectionPolicy):
     def __init__(self):
         self._node_metrics_cache: Dict[str, Dict[str, Any]] = {}
         self._cache_last_updated: float = 0.0
-        self._cache_ttl = 1 # 1 secondo di TTL nella cache
+        self._cache_ttl: int = 1 # 1 secondo di TTL nella cache
 
-    def _update_metrics_cache(self, nodes: Dict[str, Dict[str, Any]]):
-        """Funzione helper per aggiornare le metriche di tutti i nodi."""
+    async def _update_metrics_cache(self, nodes: Dict[str, Dict[str, Any]]):        
+        tasks = []
         for node_name, node_info in nodes.items():
-            try:
-                metrics_json_str = _run_ssh_command(node_info, "/usr/local/bin/get_node_metrics.sh")
-                metrics = json.loads(metrics_json_str)
-                self._node_metrics_cache[node_name] = {
-                    "cpu_usage": float(metrics.get("cpu_usage", float('inf'))),
-                    "ram_usage": float(metrics.get("ram_usage", float('inf'))),
-                }
-            except Exception as e:
-                print(f"  Errore nel recupero metriche per '{node_name}': {e}. Ignorato.")
-                if node_name in self._node_metrics_cache:
-                    del self._node_metrics_cache[node_name]
+            task = _run_ssh_command_async(node_info, "/usr/local/bin/get_node_metrics.sh")
+            tasks.append((node_name, task))
+
+        results = await asyncio.gather(*(task for _, task in tasks), return_exceptions=True)
+        
+        temp_cache = {}
+        for (node_name, _), result in zip(tasks, results):
+            if isinstance(result, Exception):
+                print(f"  Errore nel recupero metriche per '{node_name}': {result}. Ignorato.")
+            else:
+                try:
+                    metrics = json.loads(result)
+                    temp_cache[node_name] = {
+                        "cpu_usage": float(metrics.get("cpu_usage", float('inf'))),
+                        "ram_usage": float(metrics.get("ram_usage", float('inf'))),
+                    }
+                except (json.JSONDecodeError, TypeError):
+                    print(f"Errore nel parsing del JSON da '{node_name}'.")
+
+        self._node_metrics_cache = temp_cache
+        self._cache_last_updated = time.time()
         
         self._cache_last_updated = time.time()
 
-    def select_node(self, nodes: Dict[str, Dict[str, Any]], function_name: str) -> Optional[str]:
+    async def select_node(self, nodes: Dict[str, Dict[str, Any]], function_name: str) -> Optional[str]:
         if not nodes:
             return None
 
         if (time.time() - self._cache_last_updated) > self._cache_ttl:
-            self._update_metrics_cache(nodes)
+            await self._update_metrics_cache(nodes)
         
         if not self._node_metrics_cache:
             print("Least Used: Cache delle metriche vuota, nessun nodo selezionabile.")
@@ -193,7 +167,7 @@ class LeastUsedNodeSelectionPolicy(NodeSelectionPolicy):
                 "Node": selected_node,
                 "CPU Usage % ": self._node_metrics_cache[selected_node]['cpu_usage'],
                 "RAM Usage %": self._node_metrics_cache[selected_node]['ram_usage'],
-                "Policy": "Least Used (Cached)"
+                "Policy": "Least Used"
             }
             write_metrics_to_csv(metrics_data)
         
@@ -268,7 +242,7 @@ def list_nodes() -> Dict[str, Dict[str, Any]]:
     return {name: {k: v for k, v in info.items() if k != "password"} for name, info in node_registry.items()}
 
 @app.post("/functions/invoke/{function_name}")
-def invoke_function(function_name: str, req: InvokeFunctionRequest):
+async def invoke_function(function_name: str, req: InvokeFunctionRequest):
     if function_name not in function_registry:
         raise HTTPException(status_code=404, detail=f"Funzione '{function_name}' non trovata.")
     if not node_registry:
@@ -278,7 +252,7 @@ def invoke_function(function_name: str, req: InvokeFunctionRequest):
     if not policy_instance:
         raise HTTPException(status_code=400, detail=f"Politica di scheduling '{req.policy_name}' non valida.")
 
-    node_name = policy_instance.select_node(node_registry, function_name)
+    node_name = await policy_instance.select_node(node_registry, function_name)
     format_csv_as_table()
     
     if not node_name or node_name not in node_registry:
@@ -288,7 +262,7 @@ def invoke_function(function_name: str, req: InvokeFunctionRequest):
     docker_image = function_registry[function_name]
 
     try:
-        output = _run_docker_on_node(node_info, docker_image)
+        output = await _run_docker_on_node_async(node_info, docker_image)
         return {
             "node": node_name,
             "docker_image": docker_image,
