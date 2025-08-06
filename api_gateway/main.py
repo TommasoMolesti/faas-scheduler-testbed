@@ -119,18 +119,17 @@ class RoundRobinNodeSelectionPolicy(NodeSelectionPolicy):
         if current_node_names != self._nodes_cache:
             self._nodes_cache = current_node_names
             self.node_iterator = itertools.cycle(current_node_names)
-            print(f"Politica Round Robin: Nodi aggiornati. Nuovo ciclo: {current_node_names}")
 
         try:
             selected_node = next(self.node_iterator)
-            print(f"Politica Round Robin: Selezionato nodo '{selected_node}' per funzione '{function_name}'.")
+            print(f"Round Robin: Selezionato nodo '{selected_node}' per funzione '{function_name}'.")
             return selected_node
         except StopIteration:
             return None
 
-class LeastLoadedNodeSelectionPolicy(NodeSelectionPolicy):
+class LeastUsedNodeSelectionPolicy(NodeSelectionPolicy):
     """
-    Politica di selezione del nodo Least Loaded.
+    Politica di selezione del nodo Least Used.
     Seleziona il nodo con il carico medio più basso.
     """
     def select_node(self, nodes: Dict[str, Dict[str, Any]], function_name: str) -> Optional[str]:
@@ -140,19 +139,17 @@ class LeastLoadedNodeSelectionPolicy(NodeSelectionPolicy):
         min_load = float('inf')
         selected_node_name = None
 
-        print(f"Politica Least Loaded: Valutazione nodi per funzione '{function_name}'.")
-
         # Prende il load_average di tutti i nodi e salva il nodo con quello più piccolo
         for node_name, node_info in nodes.items():
             try:
                 # Esegue lo script get_node_metrics.sh sul nodo SSH
                 metrics_json_str = _run_ssh_command(node_info, "/usr/local/bin/get_node_metrics.sh")
                 metrics = json.loads(metrics_json_str)
-                
-                # Per adesso prende solo load_average
-                current_load = float(metrics.get("load_average", float('inf')))
 
-                print(f"  Nodo '{node_name}' (host: {node_info['host']}): Carico medio = {current_load}")
+                cpu_usage = float(metrics.get("cpu_usage", float('inf')))
+                ram_usage = float(metrics.get("ram_usage", float('inf')))
+
+                current_load = (cpu_usage + ram_usage) / 2
 
                 if current_load < min_load:
                     min_load = current_load
@@ -161,15 +158,16 @@ class LeastLoadedNodeSelectionPolicy(NodeSelectionPolicy):
                 print(f"  Errore nel recupero metriche per il nodo '{node_name}': {e}. Questo nodo verrà ignorato.")
 
         if not selected_node_name:
-            print("Politica Least Loaded: Nessun nodo idoneo trovato (o tutti i nodi non sono raggiungibili).")
+            print("Least Used: Nessun nodo idoneo trovato (o tutti i nodi non sono raggiungibili).")
             return None
 
-        print(f"Politica Least Loaded: Selezionato nodo '{selected_node_name}' con carico {min_load}.")
+        print(f"Least Used: Selezionato nodo '{selected_node_name}'  per funzione '{function_name} con carico {min_load}.")
+
         return selected_node_name
 
 SCHEDULING_POLICIES = {
     "round_robin": RoundRobinNodeSelectionPolicy(),
-    "least_loaded": LeastLoadedNodeSelectionPolicy()
+    "least_used": LeastUsedNodeSelectionPolicy()
 }
 
 @app.post("/functions/register")
@@ -177,15 +175,10 @@ def register_function(req: RegisterFunctionRequest):
     if req.name in function_registry:
         raise HTTPException(status_code=400, detail=f"Funzione '{req.name}' già registrata.")
     function_registry[req.name] = req.docker_image
-    return {"message": f"Funzione '{req.name}' registrata con immagine '{req.docker_image}'."}
 
 @app.get("/functions")
 def list_functions() -> Dict[str, str]:
     return function_registry
-
-@app.get("/functions_count")
-def functions_count_endpoint() -> int:
-    return len(function_registry)
 
 @app.post("/nodes/register")
 def register_node(req: RegisterNodeRequest):
@@ -197,15 +190,10 @@ def register_node(req: RegisterNodeRequest):
         "username": req.username,
         "password": req.password
     }
-    return {"message": f"Nodo '{req.name}' registrato."}
 
 @app.get("/nodes")
 def list_nodes() -> Dict[str, Dict[str, Any]]:
     return {name: {k: v for k, v in info.items() if k != "password"} for name, info in node_registry.items()}
-
-@app.get("/nodes_count")
-def nodes_count_endpoint() -> int:
-    return len(node_registry)
 
 @app.post("/functions/invoke/{function_name}")
 def invoke_function(function_name: str, req: InvokeFunctionRequest):

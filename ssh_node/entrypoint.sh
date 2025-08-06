@@ -28,21 +28,24 @@ chmod 0440 /etc/sudoers.d/docker-access
 # --- FINE: Modifica per workaround temporaneo con sudo ---
 
 # 4. Crea lo script per recuperare le metriche del nodo
-# Questo script verrà eseguito dal gateway via SSH
-cat << 'EOF' > /usr/local/bin/get_node_metrics.sh
+# Usando un 'heredoc' senza virgolette sul delimitatore 'EOF'
+# e facendo l'escape dei caratteri '$' che non devono essere interpretati ora.
+cat << EOF > /usr/local/bin/get_node_metrics.sh
 #!/bin/bash
-# Script per recuperare le metriche del nodo
 
-# Ottieni il carico medio (load average) dell'ultimo minuto
-LOAD_AVERAGE=$(uptime | awk -F'load average: ' '{print $2}' | awk '{print $3}')
+# CPU Usage
+cpu_usage=\$(grep 'cpu ' /proc/stat | awk '{usage=(\$2+\$4)*100/(\$2+\$4+\$5)} END {print usage}')
 
-# Ottieni la memoria RAM totale e disponibile (in KB)
-MEM_TOTAL_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-MEM_AVAILABLE_KB=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
-MEM_USED_KB=$((MEM_TOTAL_KB - MEM_AVAILABLE_KB))
+# RAM Usage
+ram_total=\$(free | awk '/Mem:/ {print \$2}')
+ram_used=\$(free | awk '/Mem:/ {print \$3}')
+ram_usage=\$(awk "BEGIN {print (\$ram_used/\$ram_total)*100}")
 
-# Formatta l'output come JSON
-echo "{\"load_average\": $LOAD_AVERAGE, \"mem_total_kb\": $MEM_TOTAL_KB, \"mem_used_kb\": $MEM_USED_KB, \"mem_available_kb\": $MEM_AVAILABLE_KB}"
+# JSON output
+echo "{"
+echo "  \\"cpu_usage\\": \\"\$cpu_usage\\","
+echo "  \\"ram_usage\\": \\"\$ram_usage\\""
+echo "}"
 EOF
 
 # Rendi lo script eseguibile
