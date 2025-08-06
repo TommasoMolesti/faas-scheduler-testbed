@@ -1,50 +1,55 @@
 #!/bin/bash
 # ssh_node/entrypoint.sh
 
+# Credenziali utente SSH
 USER="sshuser"
-PASSWORD="sshpassword"
+PASSWORD="sshpassword" # !!! CAMBIARE QUESTA PASSWORD IN UNA FORTE PER AMBIENTI DI PRODUZIONE !!!
 
-# Creazione utente SSH se non esiste e set password
+# 1. Crea l'utente SSH se non esiste e imposta la password
 if ! id -u "$USER" >/dev/null 2>&1; then
     useradd -m -s /bin/bash "$USER"
 fi
 echo "$USER:$PASSWORD" | chpasswd
 
-# Configurazione SSH per permettere l'accesso tramite password
+# 2. Configurazione SSH per permettere l'accesso tramite password
 sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config
 sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
 sed -i 's/UsePAM yes/UsePAM no/' /etc/ssh/sshd_config
 sed -i 's/ChallengeResponseAuthentication yes/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config
 
-# Gestione dei permessi Docker:
-DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+# 3. Aggiungi l'utente SSH al gruppo 'docker'
+# Questo permette all'utente di interagire con il socket Docker dell'host.
+usermod -aG docker "$USER"
 
-if ! getent group "$DOCKER_GID" >/dev/null; then
-    groupadd -g "$DOCKER_GID" docker_host_group
-    echo "Creato gruppo 'docker_host_group' con GID $DOCKER_GID"
-else
-    EXISTING_GROUP_NAME=$(getent group "$DOCKER_GID" | cut -d: -f1)
-    if [ "$EXISTING_GROUP_NAME" != "docker_host_group" ]; then
-        groupmod -n docker_host_group "$EXISTING_GROUP_NAME"
-    else
-        echo "Gruppo 'docker_host_group' con GID $DOCKER_GID già esistente."
-    fi
-fi
+# --- INIZIO: Modifica per workaround temporaneo con sudo (SOLO PER TEST) ---
+# Permetti all'utente SSH di eseguire comandi docker con sudo senza password
+echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/docker" > /etc/sudoers.d/docker-access
+chmod 0440 /etc/sudoers.d/docker-access
+# --- FINE: Modifica per workaround temporaneo con sudo ---
 
-# Aggiungi l'utente SSH al gruppo corretto
-usermod -aG docker_host_group "$USER"
+# 4. Crea lo script per recuperare le metriche del nodo
+# Questo script verrà eseguito dal gateway via SSH
+cat << 'EOF' > /usr/local/bin/get_node_metrics.sh
+#!/bin/bash
+# Script per recuperare le metriche del nodo
 
-# Avvia il servizio SSH in background
-/usr/sbin/sshd -D &
-SSH_PID=$!
+# Ottieni il carico medio (load average) dell'ultimo minuto
+LOAD_AVERAGE=$(uptime | awk -F'load average: ' '{print $2}' | awk '{print $3}')
 
-# Avvia il demone Docker in background
-dockerd > /var/log/docker.log 2>&1 &
-DOCKER_PID=$!
+# Ottieni la memoria RAM totale e disponibile (in KB)
+MEM_TOTAL_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+MEM_AVAILABLE_KB=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
+MEM_USED_KB=$((MEM_TOTAL_KB - MEM_AVAILABLE_KB))
 
-echo "SSH e Docker Daemon avviati."
+# Formatta l'output come JSON
+echo "{\"load_average\": $LOAD_AVERAGE, \"mem_total_kb\": $MEM_TOTAL_KB, \"mem_used_kb\": $MEM_USED_KB, \"mem_available_kb\": $MEM_AVAILABLE_KB}"
+EOF
 
-# Mantieni il container in esecuzione aspettando che uno dei processi principali termini
-# In questo caso, si aspetta entrambi i PID per assicurarci che il container non termini
-# finché SSH o Docker non si fermano.
-wait $SSH_PID $DOCKER_PID
+# Rendi lo script eseguibile
+chmod +x /usr/local/bin/get_node_metrics.sh
+
+echo "Nodo SSH pronto"
+
+# 5. Avvia il servizio SSH in foreground
+# Questo sarà il processo principale del container e lo manterrà in vita.
+exec /usr/sbin/sshd -D

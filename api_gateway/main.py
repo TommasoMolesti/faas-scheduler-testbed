@@ -1,7 +1,9 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import Dict, Any, Optional
+from pydantic import BaseModel, Field
+from typing import Dict, Any, Optional, List
 import paramiko
+import json
+import itertools
 
 app = FastAPI(
     title="FaaS Gateway",
@@ -12,8 +14,8 @@ function_registry: Dict[str, str] = {}
 node_registry: Dict[str, Dict[str, Any]] = {}
 
 class RegisterFunctionRequest(BaseModel):
-    name: str
-    docker_image: str
+    name: str = Field(..., description="Il nome univoco della funzione da registrare.")
+    docker_image: str = Field(..., description="Il nome dell'immagine Docker da associare alla funzione (es. 'python:3.11-slim', 'ubuntu:latest').")
 
 class RegisterNodeRequest(BaseModel):
     name: str
@@ -24,29 +26,39 @@ class RegisterNodeRequest(BaseModel):
 
 class InvokeFunctionRequest(BaseModel):
     input: Optional[Any] = None
+    policy_name: str = Field("round_robin", description="Nome della politica di scheduling da utilizzare (es. 'round_robin', 'least_loaded').")
 
-class RoundRobinNodeSelectionPolicy():
-    def __init__(self):
-        self.last_selected_node_index = -1
-        self.node_names_cache: List[str] = []
+def _run_ssh_command(node_info: Dict[str, Any], command: str) -> str:
+    """
+    Si connette a un nodo via SSH ed esegue un comando arbitrario.
+    Restituisce l'output dello stdout del comando.
+    """
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    try:
+        client.connect(
+            hostname=node_info["host"],
+            port=node_info["port"],
+            username=node_info["username"],
+            password=node_info["password"],
+            timeout=5
+        )
+        _stdin, stdout, stderr = client.exec_command(command)
 
-    def select_node(self, nodes: Dict[str, Dict[str, Any]], function_name: str) -> Optional[str]:
-        if not nodes:
-            return None
+        output = stdout.read().decode().strip()
+        error = stderr.read().decode().strip()
 
-        current_node_names = list(nodes.keys())
-
-        if current_node_names != self.node_names_cache:
-            self.node_names_cache = current_node_names
-            self.last_selected_node_index = -1
-
-        if not self.node_names_cache:
-            return None
-
-        self.last_selected_node_index = (self.last_selected_node_index + 1) % len(self.node_names_cache)
-        return self.node_names_cache[self.last_selected_node_index]
-
-node_selection_policy = RoundRobinNodeSelectionPolicy()
+        if error:
+            raise Exception(f"Errore SSH durante l'esecuzione del comando '{command}': {error}")
+        return output
+    except paramiko.AuthenticationException:
+        raise Exception("Autenticazione SSH fallita. Controlla username/password.")
+    except paramiko.SSHException as e:
+        raise Exception(f"Impossibile stabilire la connessione SSH: {e}")
+    except Exception as e:
+        raise Exception(f"Si è verificato un errore inatteso durante l'esecuzione SSH: {e}")
+    finally:
+        client.close()
 
 def _run_docker_on_node(node_info: Dict[str, Any], docker_image: str) -> str:
     """
@@ -62,7 +74,7 @@ def _run_docker_on_node(node_info: Dict[str, Any], docker_image: str) -> str:
             password=node_info["password"],
             timeout=10
         )
-        docker_cmd = f"docker run --rm {docker_image}"
+        docker_cmd = f"sudo docker run --rm {docker_image}"
         _stdin, stdout, stderr = client.exec_command(docker_cmd)
 
         output = stdout.read().decode().strip()
@@ -80,19 +92,99 @@ def _run_docker_on_node(node_info: Dict[str, Any], docker_image: str) -> str:
     finally:
         client.close()
 
+class NodeSelectionPolicy:
+    """
+    Classe base per la politica di selezione del nodo.
+    Sovrascrivi 'select_node' per politiche personalizzate.
+    Politica di default: sceglie il primo disponibile
+    """
+    def select_node(self, nodes: Dict[str, Dict[str, Any]], function_name: str) -> Optional[str]:
+        return next(iter(nodes.keys())) if nodes else None
+
+class RoundRobinNodeSelectionPolicy(NodeSelectionPolicy):
+    """
+    Politica di selezione del nodo Round Robin.
+    Seleziona i nodi in modo sequenziale per distribuire il carico.
+    """
+    def __init__(self):
+        self.node_iterator = itertools.cycle([])
+        self._nodes_cache = []
+
+    def select_node(self, nodes: Dict[str, Dict[str, Any]], function_name: str) -> Optional[str]:
+        if not nodes:
+            return None
+
+        current_node_names = sorted(list(nodes.keys()))
+
+        if current_node_names != self._nodes_cache:
+            self._nodes_cache = current_node_names
+            self.node_iterator = itertools.cycle(current_node_names)
+            print(f"Politica Round Robin: Nodi aggiornati. Nuovo ciclo: {current_node_names}")
+
+        try:
+            selected_node = next(self.node_iterator)
+            print(f"Politica Round Robin: Selezionato nodo '{selected_node}' per funzione '{function_name}'.")
+            return selected_node
+        except StopIteration:
+            return None
+
+class LeastLoadedNodeSelectionPolicy(NodeSelectionPolicy):
+    """
+    Politica di selezione del nodo Least Loaded.
+    Seleziona il nodo con il carico medio più basso.
+    """
+    def select_node(self, nodes: Dict[str, Dict[str, Any]], function_name: str) -> Optional[str]:
+        if not nodes:
+            return None
+
+        min_load = float('inf')
+        selected_node_name = None
+
+        print(f"Politica Least Loaded: Valutazione nodi per funzione '{function_name}'.")
+
+        # Prende il load_average di tutti i nodi e salva il nodo con quello più piccolo
+        for node_name, node_info in nodes.items():
+            try:
+                # Esegue lo script get_node_metrics.sh sul nodo SSH
+                metrics_json_str = _run_ssh_command(node_info, "/usr/local/bin/get_node_metrics.sh")
+                metrics = json.loads(metrics_json_str)
+                
+                # Per adesso prende solo load_average
+                current_load = float(metrics.get("load_average", float('inf')))
+
+                print(f"  Nodo '{node_name}' (host: {node_info['host']}): Carico medio = {current_load}")
+
+                if current_load < min_load:
+                    min_load = current_load
+                    selected_node_name = node_name
+            except Exception as e:
+                print(f"  Errore nel recupero metriche per il nodo '{node_name}': {e}. Questo nodo verrà ignorato.")
+
+        if not selected_node_name:
+            print("Politica Least Loaded: Nessun nodo idoneo trovato (o tutti i nodi non sono raggiungibili).")
+            return None
+
+        print(f"Politica Least Loaded: Selezionato nodo '{selected_node_name}' con carico {min_load}.")
+        return selected_node_name
+
+SCHEDULING_POLICIES = {
+    "round_robin": RoundRobinNodeSelectionPolicy(),
+    "least_loaded": LeastLoadedNodeSelectionPolicy()
+}
+
 @app.post("/functions/register")
 def register_function(req: RegisterFunctionRequest):
     if req.name in function_registry:
         raise HTTPException(status_code=400, detail=f"Funzione '{req.name}' già registrata.")
     function_registry[req.name] = req.docker_image
-    return f"Funzione {req.name}' registrata con immagine '{req.docker_image}'."
+    return {"message": f"Funzione '{req.name}' registrata con immagine '{req.docker_image}'."}
 
 @app.get("/functions")
 def list_functions() -> Dict[str, str]:
     return function_registry
 
 @app.get("/functions_count")
-def functions_count() -> int:
+def functions_count_endpoint() -> int:
     return len(function_registry)
 
 @app.post("/nodes/register")
@@ -105,14 +197,14 @@ def register_node(req: RegisterNodeRequest):
         "username": req.username,
         "password": req.password
     }
-    return f"Nodo '{req.name}' registrato."
+    return {"message": f"Nodo '{req.name}' registrato."}
 
 @app.get("/nodes")
 def list_nodes() -> Dict[str, Dict[str, Any]]:
     return {name: {k: v for k, v in info.items() if k != "password"} for name, info in node_registry.items()}
 
 @app.get("/nodes_count")
-def nodes_count() -> int:
+def nodes_count_endpoint() -> int:
     return len(node_registry)
 
 @app.post("/functions/invoke/{function_name}")
@@ -122,16 +214,25 @@ def invoke_function(function_name: str, req: InvokeFunctionRequest):
     if not node_registry:
         raise HTTPException(status_code=503, detail="Nessun nodo disponibile per l'esecuzione.")
 
-    node_name = node_selection_policy.select_node(node_registry, function_name)
-    print(f"Nodo logico {node_name} ha invocato {function_name}")
+    policy_instance = SCHEDULING_POLICIES.get(req.policy_name)
+    if not policy_instance:
+        raise HTTPException(status_code=400, detail=f"Politica di scheduling '{req.policy_name}' non valida.")
+
+    node_name = policy_instance.select_node(node_registry, function_name)
+    
     if not node_name or node_name not in node_registry:
-        raise HTTPException(status_code=503, detail="Nessun nodo idoneo trovato o il nodo selezionato non è valido.")
+        raise HTTPException(status_code=503, detail=f"Nessun nodo idoneo trovato dalla politica '{req.policy_name}'.")
 
     node_info = node_registry[node_name]
     docker_image = function_registry[function_name]
 
     try:
         output = _run_docker_on_node(node_info, docker_image)
-        return output
+        return {
+            "node": node_name,
+            "docker_image": docker_image,
+            "output": output,
+            "policy_used": req.policy_name
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Invocazione della funzione fallita: {e}")
