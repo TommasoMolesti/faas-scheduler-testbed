@@ -16,8 +16,8 @@ SSH_NODE_SERVICE_NAMES = [
     "ssh_node_3",
     "ssh_node_4"
 ]
-# POLICY="least_used"
-POLICY="round_robin"
+POLICY="least_used"
+# POLICY="round_robin"
 
 def register_function(name: str, docker_image: str):
     """Registra una funzione sul gateway."""
@@ -83,7 +83,26 @@ def invoke_function(function_name: str, policy: str = "round_robin", input_data:
     except Exception as err:
         print(f"Si è verificato un errore inatteso durante l'invocazione: {err}")
 
+def init():
+    url = f"{BASE_URL}/init"
+    try:
+        response = requests.post(url)
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as err:
+        print(f"Errore HTTP durante l'invocazione della funzione '{function_name}': {err}")
+        try:
+            error_details = err.response.json()
+            print(f"Dettagli: {error_details}")
+        except json.JSONDecodeError:
+            print(f"Dettagli: {err.response.text}")
+    except requests.exceptions.ConnectionError as err:
+        print(f"Errore di connessione: Assicurati che il server FastAPI sia in esecuzione su {BASE_URL}. Dettagli: {err}")
+    except Exception as err:
+        print(f"Si è verificato un errore inatteso durante l'invocazione: {err}")
+
+
 if __name__ == "__main__":
+    init()
     print("\nRegistrazione Nodi Fisici...")
     for service_name in SSH_NODE_SERVICE_NAMES:
         register_node(service_name, service_name, USER, PASSWORD, port=22)

@@ -4,6 +4,9 @@ from typing import Dict, Any, Optional, List
 import paramiko
 import json
 import itertools
+import os
+import pandas as pd
+from tabulate import tabulate
 
 app = FastAPI(
     title="FaaS Gateway",
@@ -122,7 +125,15 @@ class RoundRobinNodeSelectionPolicy(NodeSelectionPolicy):
 
         try:
             selected_node = next(self.node_iterator)
-            print(f"Round Robin: Selezionato nodo '{selected_node}' per funzione '{function_name}'.")
+            metrics_data = {
+                "Function": function_name,
+                "Node": selected_node,
+                "CPU Usage % ": "None",
+                "RAM Usage %": "None",
+                "Policy": "Round Robin"
+            }
+
+            write_metrics_to_csv(metrics_data)
             return selected_node
         except StopIteration:
             return None
@@ -137,7 +148,7 @@ class LeastUsedNodeSelectionPolicy(NodeSelectionPolicy):
             return None
 
         min_load = float('inf')
-        selected_node_name = None
+        selected_node = None
 
         # Prende il load_average di tutti i nodi e salva il nodo con quello più piccolo
         for node_name, node_info in nodes.items():
@@ -153,22 +164,68 @@ class LeastUsedNodeSelectionPolicy(NodeSelectionPolicy):
 
                 if current_load < min_load:
                     min_load = current_load
-                    selected_node_name = node_name
+                    selected_node = node_name
             except Exception as e:
                 print(f"  Errore nel recupero metriche per il nodo '{node_name}': {e}. Questo nodo verrà ignorato.")
 
-        if not selected_node_name:
+        if not selected_node:
             print("Least Used: Nessun nodo idoneo trovato (o tutti i nodi non sono raggiungibili).")
             return None
 
-        print(f"Least Used: Selezionato nodo '{selected_node_name}'  per funzione '{function_name} con carico {min_load}.")
+        metrics_data = {
+            "Function": function_name,
+            "Node": selected_node,
+            "CPU Usage % ": cpu_usage,
+            "RAM Usage %": ram_usage,
+            "Policy": "Least Used"
+        }
 
-        return selected_node_name
+        write_metrics_to_csv(metrics_data)
+
+        return selected_node
+
+def write_metrics_to_csv(metrics_data: Dict[str, Any], filename: str = "metrics.csv"):
+    file_path = os.path.join("/app", filename)
+    df = pd.DataFrame([metrics_data])
+    write_header = not os.path.exists(file_path) or os.path.getsize(file_path) == 0
+
+    df.to_csv(file_path, mode='a', header=write_header, index=False)
+
+def format_csv_as_table(input_file="metrics.csv", output_file="metrics_table.txt"):
+    if not os.path.exists(input_file):
+        print(f"Il file {input_file} non esiste.")
+        return False
+    
+    try:
+        df = pd.read_csv(input_file)
+        table = tabulate(df, headers='keys', tablefmt='grid', showindex=False)
+        
+        with open(output_file, 'w') as f:
+            f.write(table)
+                
+        return True
+    except Exception as e:
+        print(f"Errore durante la formattazione: {e}")
+        return False
+
+def clean(filename):
+    file_path = os.path.join("/app", filename)
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, 'w') as f:
+                f.truncate(0)
+        except Exception as e:
+            print(f"Errore durante la pulizia del file '{file_path}': {e}")
 
 SCHEDULING_POLICIES = {
     "round_robin": RoundRobinNodeSelectionPolicy(),
     "least_used": LeastUsedNodeSelectionPolicy()
 }
+
+@app.post("/init")
+def init():
+    clean("metrics.csv")
+    clean("metrics_table.txt")
 
 @app.post("/functions/register")
 def register_function(req: RegisterFunctionRequest):
@@ -207,6 +264,7 @@ def invoke_function(function_name: str, req: InvokeFunctionRequest):
         raise HTTPException(status_code=400, detail=f"Politica di scheduling '{req.policy_name}' non valida.")
 
     node_name = policy_instance.select_node(node_registry, function_name)
+    format_csv_as_table()
     
     if not node_name or node_name not in node_registry:
         raise HTTPException(status_code=503, detail=f"Nessun nodo idoneo trovato dalla politica '{req.policy_name}'.")
