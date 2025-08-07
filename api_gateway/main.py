@@ -80,7 +80,7 @@ class RoundRobinNodeSelectionPolicy(NodeSelectionPolicy):
 
     async def select_node(self, nodes: Dict[str, Dict[str, Any]], function_name: str) -> Optional[str]:
         if not nodes:
-            return None
+            return None, None
 
         current_node_names = sorted(list(nodes.keys()))
 
@@ -90,18 +90,17 @@ class RoundRobinNodeSelectionPolicy(NodeSelectionPolicy):
 
         try:
             selected_node = next(self.node_iterator)
-            metrics_data = {
+            
+            metric_entry = {
                 "Function": function_name,
                 "Node": selected_node,
-                "CPU Usage % ": "None",
-                "RAM Usage %": "None",
+                "CPU Usage % ": "N/A",
+                "RAM Usage %": "N/A",
                 "Policy": "Round Robin"
             }
-
-            write_metrics_to_csv(metrics_data)
-            return selected_node
+            return selected_node, metric_entry
         except StopIteration:
-            return None
+            return None, None
 
 class LeastUsedNodeSelectionPolicy(NodeSelectionPolicy):
     """
@@ -138,13 +137,13 @@ class LeastUsedNodeSelectionPolicy(NodeSelectionPolicy):
 
     async def select_node(self, nodes: Dict[str, Dict[str, Any]], function_name: str) -> Optional[str]:
         if not nodes:
-            return None
+            return None, None
 
         node_metrics = await self._get_all_node_metrics(nodes)
         
         if not node_metrics:
             print("Least Used: Impossibile recuperare le metriche da alcun nodo.")
-            return None
+            return None, None
 
         min_load = float('inf')
         selected_node = None
@@ -156,16 +155,16 @@ class LeastUsedNodeSelectionPolicy(NodeSelectionPolicy):
                 selected_node = node_name
         
         if selected_node:
-            metrics_data = {
+            metric_entry = {
                 "Function": function_name,
                 "Node": selected_node,
                 "CPU Usage % ": node_metrics[selected_node]['cpu_usage'],
                 "RAM Usage %": node_metrics[selected_node]['ram_usage'],
                 "Policy": "Least Used"
             }
-            write_metrics_to_csv(metrics_data)
+            return selected_node, metric_entry
         
-        return selected_node
+        return None, None
 
 def write_metrics_to_csv(metrics_data: Dict[str, Any], filename: str = "metrics.csv"):
     file_path = os.path.join("/app", filename)
@@ -246,8 +245,7 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
     if not policy_instance:
         raise HTTPException(status_code=400, detail=f"Politica di scheduling '{req.policy_name}' non valida.")
 
-    node_name = await policy_instance.select_node(node_registry, function_name)
-    format_csv_as_table()
+    node_name, metric_to_write = await policy_instance.select_node(node_registry, function_name)
     
     if not node_name or node_name not in node_registry:
         raise HTTPException(status_code=503, detail=f"Nessun nodo idoneo trovato dalla politica '{req.policy_name}'.")
@@ -257,6 +255,9 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
 
     try:
         output = await _run_docker_on_node_async(node_info, docker_image)
+        if metric_to_write:
+            write_metrics_to_csv(metric_to_write)
+        format_csv_as_table()
         return {
             "node": node_name,
             "docker_image": docker_image,
