@@ -111,7 +111,7 @@ class LeastUsedNodeSelectionPolicy(NodeSelectionPolicy):
     def __init__(self):
         self._node_metrics_cache: Dict[str, Dict[str, Any]] = {}
         self._cache_last_updated: float = 0.0
-        self._cache_ttl: int = 1 # 1 secondo di TTL nella cache
+        self._cache_ttl: int = 0 # 1 secondo di TTL nella cache
 
     async def _update_metrics_cache(self, nodes: Dict[str, Dict[str, Any]]):        
         tasks = []

@@ -5,8 +5,8 @@ from typing import Optional, Any, List
 
 BASE_URL = "http://api_gateway:8000"
 
-DOCKER_IMAGE = "busybox"
-COMMAND = "echo Hello world from Busybox!"
+DOCKER_IMAGE = "python-function-base"
+COMMAND = "python loop_function.py"
 NUM_FUNCTIONS = 20
 USER = "sshuser"
 PASSWORD = "sshpassword"
