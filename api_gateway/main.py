@@ -108,12 +108,11 @@ class LeastUsedNodeSelectionPolicy(NodeSelectionPolicy):
     Politica di selezione del nodo Least Used.
     Seleziona il nodo con il carico medio più basso.
     """
-    def __init__(self):
-        self._node_metrics_cache: Dict[str, Dict[str, Any]] = {}
-        self._cache_last_updated: float = 0.0
-        self._cache_ttl: int = 0 # 1 secondo di TTL nella cache
 
-    async def _update_metrics_cache(self, nodes: Dict[str, Dict[str, Any]]):        
+    async def _get_all_node_metrics(self, nodes: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        """
+        Si connette a tutti i nodi in parallelo e restituisce le loro metriche.
+        """
         tasks = []
         for node_name, node_info in nodes.items():
             task = _run_ssh_command_async(node_info, "/usr/local/bin/get_node_metrics.sh")
@@ -121,41 +120,36 @@ class LeastUsedNodeSelectionPolicy(NodeSelectionPolicy):
 
         results = await asyncio.gather(*(task for _, task in tasks), return_exceptions=True)
         
-        temp_cache = {}
+        live_metrics = {}
         for (node_name, _), result in zip(tasks, results):
             if isinstance(result, Exception):
                 print(f"  Errore nel recupero metriche per '{node_name}': {result}. Ignorato.")
             else:
                 try:
                     metrics = json.loads(result)
-                    temp_cache[node_name] = {
+                    live_metrics[node_name] = {
                         "cpu_usage": float(metrics.get("cpu_usage", float('inf'))),
                         "ram_usage": float(metrics.get("ram_usage", float('inf'))),
                     }
                 except (json.JSONDecodeError, TypeError):
                     print(f"Errore nel parsing del JSON da '{node_name}'.")
-
-        self._node_metrics_cache = temp_cache
-        self._cache_last_updated = time.time()
         
-        self._cache_last_updated = time.time()
+        return live_metrics
 
     async def select_node(self, nodes: Dict[str, Dict[str, Any]], function_name: str) -> Optional[str]:
         if not nodes:
             return None
 
-        if (time.time() - self._cache_last_updated) > self._cache_ttl:
-            await self._update_metrics_cache(nodes)
+        node_metrics = await self._get_all_node_metrics(nodes)
         
-        if not self._node_metrics_cache:
-            print("Least Used: Cache delle metriche vuota, nessun nodo selezionabile.")
+        if not node_metrics:
+            print("Least Used: Impossibile recuperare le metriche da alcun nodo.")
             return None
 
         min_load = float('inf')
         selected_node = None
         
-        # Sceglie il nodo basandosi sulla cache
-        for node_name, metrics in self._node_metrics_cache.items():
+        for node_name, metrics in node_metrics.items():
             current_load = (metrics["cpu_usage"] + metrics["ram_usage"]) / 2
             if current_load < min_load:
                 min_load = current_load
@@ -165,8 +159,8 @@ class LeastUsedNodeSelectionPolicy(NodeSelectionPolicy):
             metrics_data = {
                 "Function": function_name,
                 "Node": selected_node,
-                "CPU Usage % ": self._node_metrics_cache[selected_node]['cpu_usage'],
-                "RAM Usage %": self._node_metrics_cache[selected_node]['ram_usage'],
+                "CPU Usage % ": node_metrics[selected_node]['cpu_usage'],
+                "RAM Usage %": node_metrics[selected_node]['ram_usage'],
                 "Policy": "Least Used"
             }
             write_metrics_to_csv(metrics_data)
