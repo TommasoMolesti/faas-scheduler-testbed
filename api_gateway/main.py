@@ -32,6 +32,7 @@ class RegisterNodeRequest(BaseModel):
 class InvokeFunctionRequest(BaseModel):
     input: Optional[Any] = None
     policy_name: str = Field("round_robin", description="Nome della politica di scheduling da utilizzare (es. 'round_robin', 'least_loaded').")
+    execution_mode: Optional[str] = None
 
 async def _run_ssh_command_async(node_info: Dict[str, Any], command: str) -> str:
     """
@@ -45,7 +46,7 @@ async def _run_ssh_command_async(node_info: Dict[str, Any], command: str) -> str
             password=node_info["password"],
             known_hosts=None
         ) as conn:
-            result = await conn.run(command, check=True)
+            result = await conn.run(command)
             return result.stdout.strip()
     except asyncssh.Error as e:
         raise Exception(f"Errore SSH o del comando sul nodo '{node_info['host']}': {e}")
@@ -166,6 +167,37 @@ class LeastUsedNodeSelectionPolicy(NodeSelectionPolicy):
         
         return None, None
 
+class WarmedFirstPolicy(NodeSelectionPolicy):
+    """
+    Politica che cerca prima un container 'warmed'.
+    Se non lo trova, esegue un fallback alla politica 'least_used' per un cold start.
+    """
+    def __init__(self, fallback_policy: NodeSelectionPolicy):
+        self._fallback_policy = fallback_policy
+
+    async def select_node(self, nodes: Dict[str, Dict[str, Any]], function_name: str) -> tuple[Optional[str], Optional[Dict]]:
+        for node_name, node_info in nodes.items():
+            container_name = f"warmed--{function_name}--{node_name}"
+            check_cmd = f"sudo docker ps -q -f name=^{container_name}$"
+            
+            try:
+                running_container_id = await _run_ssh_command_async(node_info, check_cmd)
+                if running_container_id:
+                    metric_entry = {
+                        "Function": function_name,
+                        "Node": node_name,
+                        "CPU Usage % ": "WARMED",
+                        "RAM Usage %": "WARMED",
+                        "Policy": "Warmed First"
+                    }
+                    return node_name, metric_entry
+            except Exception:
+                continue
+
+        print("Nessun container 'warmed' trovato. Eseguo fallback a 'least_used' per un cold start.")
+        return await self._fallback_policy.select_node(nodes, function_name)
+
+
 def write_metrics_to_csv(metrics_data: Dict[str, Any], filename: str = "metrics.csv"):
     file_path = os.path.join("/app", filename)
     df = pd.DataFrame([metrics_data])
@@ -201,7 +233,8 @@ def clean(filename):
 
 SCHEDULING_POLICIES = {
     "round_robin": RoundRobinNodeSelectionPolicy(),
-    "least_used": LeastUsedNodeSelectionPolicy()
+    "least_used": LeastUsedNodeSelectionPolicy(),
+    "warmed_first": WarmedFirstPolicy(fallback_policy=LeastUsedNodeSelectionPolicy())
 }
 
 @app.post("/init")
@@ -236,6 +269,8 @@ def list_nodes() -> Dict[str, Dict[str, Any]]:
 
 @app.post("/functions/invoke/{function_name}")
 async def invoke_function(function_name: str, req: InvokeFunctionRequest):
+    start_time = time.perf_counter()
+
     if function_name not in function_registry:
         raise HTTPException(status_code=404, detail=f"Funzione '{function_name}' non trovata.")
     if not node_registry:
@@ -254,15 +289,79 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
     docker_image = function_registry[function_name]
 
     try:
-        output = await _run_docker_on_node_async(node_info, docker_image)
+        is_warmed_execution = metric_to_write and metric_to_write.get("CPU Usage % ") == "WARMED"
+
+        if is_warmed_execution:
+            container_name = f"warmed--{function_name}--{node_name}"
+            output = await _run_ssh_command_async(node_info, f"sudo docker logs {container_name}")
+        else:
+            output = await _run_docker_on_node_async(node_info, docker_image)
+        
+        end_time = time.perf_counter()
+        duration = end_time - start_time
+
         if metric_to_write:
+            if req.execution_mode == "pre-warmed" and not is_warmed_execution:
+                metric_to_write["Policy"] = "Least Used (Pre-warmed)"
+            metric_to_write["Execution Time (s)"] = f"{duration:.4f}"
             write_metrics_to_csv(metric_to_write)
+        
         format_csv_as_table()
+
         return {
             "node": node_name,
             "docker_image": docker_image,
             "output": output,
-            "policy_used": req.policy_name
+            "policy_used": req.policy_name,
+            "execution_type": "warmed" if is_warmed_execution else "cold",
+            "duration_seconds": duration
         }
     except Exception as e:
+        end_time = time.perf_counter()
+        duration = end_time - start_time
+        print(f"Invocazione fallita dopo {duration:.4f} secondi.")
         raise HTTPException(status_code=500, detail=f"Invocazione della funzione fallita: {e}")
+
+@app.post("/functions/prewarm")
+async def prewarm_function(function_name: str, node_name: str):
+    """
+    Esegue un 'docker pull' dell'immagine di una funzione su un nodo specifico.
+    """
+    if function_name not in function_registry:
+        raise HTTPException(status_code=404, detail="Funzione non trovata.")
+    if node_name not in node_registry:
+        raise HTTPException(status_code=404, detail="Nodo non trovato.")
+
+    node_info = node_registry[node_name]
+    docker_image_name = function_registry[function_name].split(' ')[0]
+    
+    try:
+        output = await _run_ssh_command_async(node_info, f"sudo docker pull {docker_image_name}")
+        return {"status": "success", "node": node_name, "image": docker_image_name, "output": output}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/functions/warmup")
+async def warmup_function(function_name: str, node_name: str):
+    """
+    Avvia un'istanza di una funzione in background (detached) su un nodo specifico,
+    simulando un container 'warmed'.
+    """
+    if function_name not in function_registry:
+        raise HTTPException(status_code=404, detail="Funzione non trovata.")
+    if node_name not in node_registry:
+        raise HTTPException(status_code=404, detail="Nodo non trovato.")
+
+    node_info = node_registry[node_name]
+    docker_image_and_command = function_registry[function_name]
+    container_name = f"warmed--{function_name}--{node_name}"
+
+    await _run_ssh_command_async(node_info, f"sudo docker rm -f {container_name}")
+
+    docker_cmd = f"sudo docker run -d --name {container_name} {docker_image_and_command}"
+    
+    try:
+        container_id = await _run_ssh_command_async(node_info, docker_cmd)
+        return {"status": "warming_up", "node": node_name, "container_name": container_name, "container_id": container_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

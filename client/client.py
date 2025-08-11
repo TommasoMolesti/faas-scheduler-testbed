@@ -16,8 +16,6 @@ SSH_NODE_SERVICE_NAMES = [
     "ssh_node_3",
     "ssh_node_4"
 ]
-POLICY="least_used"
-# POLICY="round_robin"
 
 def register_function(name: str, docker_image: str):
     """Registra una funzione sul gateway."""
@@ -64,7 +62,7 @@ def register_node(name: str, host: str, username: str, password: str, port: int 
     except Exception as err:
         print(f"Si è verificato un errore inatteso: {err}")
 
-def invoke_function(function_name: str, policy: str = "round_robin", input_data: Optional[Any] = None):
+def invoke_function(function_name: str, policy: str = "round_robin", input_data: Optional[Any] = None, execution_mode: Optional[str] = None):
     url = f"{BASE_URL}/functions/invoke/{function_name}"
     payload = {"input": input_data, "policy_name": policy}
     try:
@@ -100,22 +98,31 @@ def init():
     except Exception as err:
         print(f"Si è verificato un errore inatteso durante l'invocazione: {err}")
 
-
 if __name__ == "__main__":
     init()
-    print("\nRegistrazione Nodi Fisici...")
     for service_name in SSH_NODE_SERVICE_NAMES:
         register_node(service_name, service_name, USER, PASSWORD, port=22)
-    print("Ok.")
+    
+    methods=["warmed", "cold", "pre-warmed"]
 
-    print("\nRegistrazione Funzioni...")
-    for i in range(1, NUM_FUNCTIONS + 1):
-        register_function(f"func-{i}", f"{DOCKER_IMAGE} /bin/sh -c '{COMMAND}'")
-    print("Ok.")
+    for i in range(0, NUM_FUNCTIONS):
+        current_method = methods[i % len(methods)]
+        func_name = f"func-{i+1}"
 
-    print("\nInvocazione Funzioni...")
-    for i in range(1, NUM_FUNCTIONS + 1):
-        invoke_function(f"func-{i}", policy=POLICY)
-    print("Ok.")
+        if current_method == "cold":
+            command = f"{DOCKER_IMAGE} {COMMAND}"
+            register_function(func_name, command)
 
-    print("\nScript client completato.")
+            invoke_function(func_name, policy="least_used")
+        elif current_method == "warmed":
+            command = f"{DOCKER_IMAGE} python warmed_function.py"
+            register_function(func_name, command)
+            requests.post(f"{BASE_URL}/functions/warmup?function_name={func_name}&node_name=ssh_node_1")
+            
+            invoke_function(func_name, policy="warmed_first", execution_mode="pre-warmed")
+        else:
+            command = f"{DOCKER_IMAGE} {COMMAND}"
+            register_function(func_name, command)
+            requests.post(f"{BASE_URL}/functions/prewarm?function_name={func_name}&node_name=ssh_node_2")
+            
+            invoke_function(func_name, policy="least_used")
