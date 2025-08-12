@@ -30,9 +30,9 @@ class RegisterNodeRequest(BaseModel):
     password: str
 
 class InvokeFunctionRequest(BaseModel):
-    input: Optional[Any] = None
     policy_name: str = Field("round_robin", description="Nome della politica di scheduling da utilizzare (es. 'round_robin', 'least_loaded').")
     execution_mode: Optional[str] = None
+    node_name: Optional[str] = None
 
 async def _run_ssh_command_async(node_info: Dict[str, Any], command: str) -> str:
     """
@@ -276,15 +276,24 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
     if not node_registry:
         raise HTTPException(status_code=503, detail="Nessun nodo disponibile per l'esecuzione.")
 
-    policy_instance = SCHEDULING_POLICIES.get(req.policy_name)
-    if not policy_instance:
-        raise HTTPException(status_code=400, detail=f"Politica di scheduling '{req.policy_name}' non valida.")
+    if req.node_name:
+        node_name = req.node_name
+        if node_name not in node_registry:
+            raise HTTPException(status_code=404, detail=f"Nodo target '{node_name}' non trovato.")
+        policy_instance = SCHEDULING_POLICIES.get(req.policy_name)
+        _, metric_to_write = await policy_instance.select_node(node_registry, function_name)
+        metric_to_write["Policy"] = ""
+        metric_to_write["Node"] = f"{node_name}"
+    else:
+        policy_instance = SCHEDULING_POLICIES.get(req.policy_name)
+        if not policy_instance:
+            raise HTTPException(status_code=400, detail=f"Policy '{req.policy_name}' non valida.")
+        node_name, metric_to_write = await policy_instance.select_node(node_registry, function_name)
 
-    node_name, metric_to_write = await policy_instance.select_node(node_registry, function_name)
+
+    if not node_name:
+        raise HTTPException(status_code=503, detail="Nessun nodo disponibile o selezionato.")
     
-    if not node_name or node_name not in node_registry:
-        raise HTTPException(status_code=503, detail=f"Nessun nodo idoneo trovato dalla politica '{req.policy_name}'.")
-
     node_info = node_registry[node_name]
     docker_image = function_registry[function_name]
 
@@ -323,33 +332,37 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
         raise HTTPException(status_code=500, detail=f"Invocazione della funzione fallita: {e}")
 
 @app.post("/functions/prewarm")
-async def prewarm_function(function_name: str, node_name: str):
+async def prewarm_function(function_name: str):
     """
     Esegue un 'docker pull' dell'immagine di una funzione su un nodo specifico.
     """
     if function_name not in function_registry:
         raise HTTPException(status_code=404, detail="Funzione non trovata.")
-    if node_name not in node_registry:
+
+    node_name, _ = await LeastUsedNodeSelectionPolicy().select_node(node_registry, function_name)
+    if not node_name:
         raise HTTPException(status_code=404, detail="Nodo non trovato.")
 
     node_info = node_registry[node_name]
-    docker_image_name = function_registry[function_name].split(' ')[0]
+    docker_image = function_registry[function_name]
     
     try:
-        output = await _run_ssh_command_async(node_info, f"sudo docker pull {docker_image_name}")
-        return {"status": "success", "node": node_name, "image": docker_image_name, "output": output}
+        output = await _run_ssh_command_async(node_info, f"sudo docker pull {docker_image}")
+        return {"status": "success", "node": node_name, "image": docker_image, "output": output}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/functions/warmup")
-async def warmup_function(function_name: str, node_name: str):
+async def warmup_function(function_name: str):
     """
     Avvia un'istanza di una funzione in background (detached) su un nodo specifico,
     simulando un container 'warmed'.
     """
     if function_name not in function_registry:
         raise HTTPException(status_code=404, detail="Funzione non trovata.")
-    if node_name not in node_registry:
+    
+    node_name, _ = await LeastUsedNodeSelectionPolicy().select_node(node_registry, function_name)
+    if not node_name:
         raise HTTPException(status_code=404, detail="Nodo non trovato.")
 
     node_info = node_registry[node_name]
@@ -362,6 +375,6 @@ async def warmup_function(function_name: str, node_name: str):
     
     try:
         container_id = await _run_ssh_command_async(node_info, docker_cmd)
-        return {"status": "warming_up", "node": node_name, "container_name": container_name, "container_id": container_id}
+        return {"status": "warming_up", "node_name": node_name, "container_name": container_name, "container_id": container_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
