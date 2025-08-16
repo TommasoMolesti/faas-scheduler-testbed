@@ -30,7 +30,6 @@ class RegisterNodeRequest(BaseModel):
     password: str
 
 class InvokeFunctionRequest(BaseModel):
-    policy_name: str = Field("round_robin", description="Nome della politica di scheduling da utilizzare (es. 'round_robin', 'least_loaded').")
     execution_mode: Optional[str] = None
     node_name: Optional[str] = None
 
@@ -167,36 +166,15 @@ class LeastUsedNodeSelectionPolicy(NodeSelectionPolicy):
         
         return None, None
 
-class WarmedFirstPolicy(NodeSelectionPolicy):
-    """
-    Politica che cerca prima un container 'warmed'.
-    Se non lo trova, esegue un fallback alla politica 'least_used' per un cold start.
-    """
-    def __init__(self, fallback_policy: NodeSelectionPolicy):
-        self._fallback_policy = fallback_policy
+# SCHEDULING_POLICY = {
+#     "name": "Round Robin",
+#     "instance": RoundRobinNodeSelectionPolicy()
+# }
 
-    async def select_node(self, nodes: Dict[str, Dict[str, Any]], function_name: str) -> tuple[Optional[str], Optional[Dict]]:
-        for node_name, node_info in nodes.items():
-            container_name = f"warmed--{function_name}--{node_name}"
-            check_cmd = f"sudo docker ps -q -f name=^{container_name}$"
-            
-            try:
-                running_container_id = await _run_ssh_command_async(node_info, check_cmd)
-                if running_container_id:
-                    metric_entry = {
-                        "Function": function_name,
-                        "Node": node_name,
-                        "CPU Usage % ": "WARMED",
-                        "RAM Usage %": "WARMED",
-                        "Policy": "Warmed First"
-                    }
-                    return node_name, metric_entry
-            except Exception:
-                continue
-
-        print("Nessun container 'warmed' trovato. Eseguo fallback a 'least_used' per un cold start.")
-        return await self._fallback_policy.select_node(nodes, function_name)
-
+SCHEDULING_POLICY = {
+    "name": "Least Used",
+    "instance": LeastUsedNodeSelectionPolicy()
+}
 
 def write_metrics_to_csv(metrics_data: Dict[str, Any], filename: str = "metrics.csv"):
     file_path = os.path.join("/app", filename)
@@ -230,12 +208,6 @@ def clean(filename):
                 f.truncate(0)
         except Exception as e:
             print(f"Errore durante la pulizia del file '{file_path}': {e}")
-
-SCHEDULING_POLICIES = {
-    "round_robin": RoundRobinNodeSelectionPolicy(),
-    "least_used": LeastUsedNodeSelectionPolicy(),
-    "warmed_first": WarmedFirstPolicy(fallback_policy=LeastUsedNodeSelectionPolicy())
-}
 
 @app.post("/init")
 def init():
@@ -276,20 +248,17 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
     if not node_registry:
         raise HTTPException(status_code=503, detail="Nessun nodo disponibile per l'esecuzione.")
 
+    policy_instance = SCHEDULING_POLICY.get("instance")
+    policy_name = SCHEDULING_POLICY.get("name")
+    if not policy_instance:
+        raise HTTPException(status_code=400, detail=f"Policy non valida.")
+
+    node_name, metric_to_write = await policy_instance.select_node(node_registry, function_name)
     if req.node_name:
         node_name = req.node_name
         if node_name not in node_registry:
             raise HTTPException(status_code=404, detail=f"Nodo target '{node_name}' non trovato.")
-        policy_instance = SCHEDULING_POLICIES.get(req.policy_name)
-        _, metric_to_write = await policy_instance.select_node(node_registry, function_name)
-        metric_to_write["Policy"] = ""
         metric_to_write["Node"] = f"{node_name}"
-    else:
-        policy_instance = SCHEDULING_POLICIES.get(req.policy_name)
-        if not policy_instance:
-            raise HTTPException(status_code=400, detail=f"Policy '{req.policy_name}' non valida.")
-        node_name, metric_to_write = await policy_instance.select_node(node_registry, function_name)
-
 
     if not node_name:
         raise HTTPException(status_code=503, detail="Nessun nodo disponibile o selezionato.")
@@ -298,9 +267,10 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
     docker_image = function_registry[function_name]
 
     try:
-        is_warmed_execution = metric_to_write and metric_to_write.get("CPU Usage % ") == "WARMED"
+        is_warmed = req.execution_mode == "warmed"
+        is_pre_warmed = req.execution_mode == "pre-warmed"
 
-        if is_warmed_execution:
+        if is_warmed:
             container_name = f"warmed--{function_name}--{node_name}"
             output = await _run_ssh_command_async(node_info, f"sudo docker logs {container_name}")
         else:
@@ -310,21 +280,17 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
         duration = end_time - start_time
 
         if metric_to_write:
-            if req.execution_mode == "pre-warmed" and not is_warmed_execution:
-                metric_to_write["Policy"] = "Least Used (Pre-warmed)"
             metric_to_write["Execution Time (s)"] = f"{duration:.4f}"
+            if is_warmed:
+                metric_to_write["Execution Mode"] = "Warmed"
+            elif is_pre_warmed:
+                metric_to_write["Execution Mode"] = "Pre-warmed"
+            else:
+                metric_to_write["Execution Mode"] = "Cold"
             write_metrics_to_csv(metric_to_write)
         
         format_csv_as_table()
 
-        return {
-            "node": node_name,
-            "docker_image": docker_image,
-            "output": output,
-            "policy_used": req.policy_name,
-            "execution_type": "warmed" if is_warmed_execution else "cold",
-            "duration_seconds": duration
-        }
     except Exception as e:
         end_time = time.perf_counter()
         duration = end_time - start_time

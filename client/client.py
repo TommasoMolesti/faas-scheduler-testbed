@@ -62,9 +62,9 @@ def register_node(name: str, host: str, username: str, password: str, port: int 
     except Exception as err:
         print(f"Si è verificato un errore inatteso: {err}")
 
-def invoke_function(function_name: str, policy: str, execution_mode: Optional[str] = None, node_name: Optional[str] = None):
+def invoke_function(function_name: str, execution_mode: Optional[str] = None, node_name: Optional[str] = None):
     url = f"{BASE_URL}/functions/invoke/{function_name}"
-    payload = {"policy_name": policy, "node_name": node_name}
+    payload = {"node_name": node_name, "execution_mode": execution_mode}
     try:
         response = requests.post(url, json=payload)
         response.raise_for_status()
@@ -113,7 +113,7 @@ if __name__ == "__main__":
             command = f"{DOCKER_IMAGE} {COMMAND}"
             register_function(func_name, command)
 
-            invoke_function(func_name, policy="least_used")
+            invoke_function(func_name)
         elif current_method == "warmed":
             command = f"{DOCKER_IMAGE} python warmed_function.py"
             register_function(func_name, command)
@@ -122,10 +122,10 @@ if __name__ == "__main__":
             if res.ok:
                 node_name = res.json().get("node_name")
         
-            invoke_function(func_name, policy="warmed_first", execution_mode="pre-warmed", node_name=node_name)
+            invoke_function(func_name, execution_mode="warmed", node_name=node_name)
         else:
             command = f"{DOCKER_IMAGE} {COMMAND}"
             register_function(func_name, command)
             requests.post(f"{BASE_URL}/functions/prewarm?function_name={func_name}")
             
-            invoke_function(func_name, policy="least_used")
+            invoke_function(func_name, execution_mode="pre-warmed")
