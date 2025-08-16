@@ -314,7 +314,7 @@ async def prewarm_function(function_name: str):
     
     try:
         output = await _run_ssh_command_async(node_info, f"sudo docker pull {docker_image}")
-        return {"status": "success", "node": node_name, "image": docker_image, "output": output}
+        return { "node_name": node_name }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -341,6 +341,6 @@ async def warmup_function(function_name: str):
     
     try:
         container_id = await _run_ssh_command_async(node_info, docker_cmd)
-        return {"status": "warming_up", "node_name": node_name, "container_name": container_name, "container_id": container_id}
+        return { "node_name": node_name }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

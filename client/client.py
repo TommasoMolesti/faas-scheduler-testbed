@@ -124,8 +124,11 @@ if __name__ == "__main__":
         
             invoke_function(func_name, execution_mode="warmed", node_name=node_name)
         else:
+            # C'è poca differenza di tempo con cold perché l'immagine docker è custom e non viene scaricata da internet
             command = f"{DOCKER_IMAGE} {COMMAND}"
             register_function(func_name, command)
-            requests.post(f"{BASE_URL}/functions/prewarm?function_name={func_name}")
-            
-            invoke_function(func_name, execution_mode="pre-warmed")
+            res = requests.post(f"{BASE_URL}/functions/prewarm?function_name={func_name}")
+            node_name = None
+            if res.ok:
+                node_name = res.json().get("node_name")
+            invoke_function(func_name, execution_mode="pre-warmed", node_name=node_name)
