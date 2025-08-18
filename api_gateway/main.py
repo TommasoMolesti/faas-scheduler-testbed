@@ -21,7 +21,8 @@ function_state_registry: Dict[str, Dict[str, str]] = {}
 
 class RegisterFunctionRequest(BaseModel):
     name: str = Field(..., description="Il nome univoco della funzione da registrare.")
-    docker_image: str = Field(..., description="Il nome dell'immagine Docker da associare alla funzione (es. 'python:3.11-slim', 'ubuntu:latest').")
+    image: str = Field(..., description="Il nome dell'immagine Docker (es. 'python:3.11-slim').")
+    command: str = Field(..., description="Il comando da eseguire nel container (es. 'python main.py').")
 
 class RegisterNodeRequest(BaseModel):
     name: str
@@ -218,7 +219,7 @@ def init():
 async def register_function(req: RegisterFunctionRequest):
     if req.name in function_registry:
         raise HTTPException(status_code=400, detail=f"Funzione '{req.name}' già registrata.")
-    function_registry[req.name] = req.docker_image
+    function_registry[req.name] = {"image": req.image, "command": req.command}
 
     node_name, _ = await SCHEDULING_POLICY["instance"].select_node(node_registry, req.name)
 
@@ -284,16 +285,17 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
                 execution_mode = "Pre-warmed"
 
     node_info = node_registry[node_name]
-    docker_image = function_registry[function_name]
+    function_details = function_registry[function_name]
 
     try:
         if execution_mode == "Warmed":
             container_name = f"warmed--{function_name}--{node_name}"
-            command_to_run = function_registry[function_name].split(" ", 1)[1] # Estrae il comando
+            command_to_run = function_details["command"]
             # Uso docker exec per eseguire lo script nel container già attivo
             output = await _run_ssh_command_async(node_info, f"sudo docker exec {container_name} {command_to_run}")
         else:
-            output = await _run_docker_on_node_async(node_info, docker_image)
+            image_and_command = f'{function_details["image"]} {function_details["command"]}'
+            output = await _run_docker_on_node_async(node_info, image_and_command)
             # Se era pre-warmed, ora è "usato", quindi torna cold.
             if execution_mode == "Pre-warmed":
                 function_state_registry[function_name][node_name] = "cold"
@@ -321,7 +323,7 @@ async def _prewarm_function_on_node(function_name: str, node_name: str):
         return
 
     node_info = node_registry[node_name]
-    docker_image = function_registry[function_name].split()[0] # Prende solo l'immagine
+    docker_image = function_registry[function_name]["image"]
 
     try:
         await _run_ssh_command_async(node_info, f"sudo docker pull {docker_image}")
@@ -339,8 +341,7 @@ async def _warmup_function_on_node(function_name: str, node_name: str):
         return
 
     node_info = node_registry[node_name]
-    docker_image_and_command = function_registry[function_name]
-    docker_image = docker_image_and_command.split()[0] # Prende solo l'immagine
+    docker_image = function_registry[function_name]["image"]
     warmed_command = "python warmed_function.py"
     docker_image_and_command_warmed = f"{docker_image} {warmed_command}"
     

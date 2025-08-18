@@ -17,10 +17,10 @@ SSH_NODE_SERVICE_NAMES = [
     "ssh_node_4"
 ]
 
-def register_function(name: str, docker_image: str):
+def register_function(name: str, image: str, command: str):
     """Registra una funzione sul gateway."""
     url = f"{BASE_URL}/functions/register"
-    payload = {"name": name, "docker_image": docker_image}
+    payload = {"name": name, "image": image, "command": command}
     try:
         response = requests.post(url, json=payload)
         response.raise_for_status()
@@ -103,10 +103,8 @@ if __name__ == "__main__":
     for service_name in SSH_NODE_SERVICE_NAMES:
         register_node(service_name, service_name, USER, PASSWORD, port=22)
     
-    command = f"{DOCKER_IMAGE} {COMMAND}"
-
     for i in range(0, NUM_FUNCTIONS):
         func_name = f"func-{i+1}"
         
-        register_function(func_name, command)
+        register_function(func_name, DOCKER_IMAGE, COMMAND)
         invoke_function(func_name)
