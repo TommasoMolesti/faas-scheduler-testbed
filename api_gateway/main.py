@@ -17,6 +17,7 @@ app = FastAPI(
 
 function_registry: Dict[str, str] = {}
 node_registry: Dict[str, Dict[str, Any]] = {}
+function_state_registry: Dict[str, Dict[str, str]] = {}
 
 class RegisterFunctionRequest(BaseModel):
     name: str = Field(..., description="Il nome univoco della funzione da registrare.")
@@ -30,8 +31,7 @@ class RegisterNodeRequest(BaseModel):
     password: str
 
 class InvokeFunctionRequest(BaseModel):
-    execution_mode: Optional[str] = None
-    node_name: Optional[str] = None
+    pass
 
 async def _run_ssh_command_async(node_info: Dict[str, Any], command: str) -> str:
     """
@@ -215,10 +215,21 @@ def init():
     clean("metrics_table.txt")
 
 @app.post("/functions/register")
-def register_function(req: RegisterFunctionRequest):
+async def register_function(req: RegisterFunctionRequest):
     if req.name in function_registry:
         raise HTTPException(status_code=400, detail=f"Funzione '{req.name}' già registrata.")
     function_registry[req.name] = req.docker_image
+
+    node_name, _ = await SCHEDULING_POLICY["instance"].select_node(node_registry, req.name)
+
+    # Ogni 3 funzioni ne preparo una "pre-warmed"
+    if len(function_registry) % 3 == 1:
+        await _prewarm_function_on_node(req.name, node_name)
+
+    # Ogni 3 funzioni (con offset 2) ne preparo una "warmed"
+    if len(function_registry) % 3 == 2:
+        await _warmup_function_on_node(req.name, node_name)
+
 
 @app.get("/functions")
 def list_functions() -> Dict[str, str]:
@@ -248,47 +259,54 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
     if not node_registry:
         raise HTTPException(status_code=503, detail="Nessun nodo disponibile per l'esecuzione.")
 
-    policy_instance = SCHEDULING_POLICY.get("instance")
-    policy_name = SCHEDULING_POLICY.get("name")
-    if not policy_instance:
-        raise HTTPException(status_code=400, detail=f"Policy non valida.")
+    node_name = None
+    execution_mode = "Cold"
 
-    node_name, metric_to_write = await policy_instance.select_node(node_registry, function_name)
-    if req.node_name:
-        node_name = req.node_name
-        if node_name not in node_registry:
-            raise HTTPException(status_code=404, detail=f"Nodo target '{node_name}' non trovato.")
-        metric_to_write["Node"] = f"{node_name}"
-
-    if not node_name:
-        raise HTTPException(status_code=503, detail="Nessun nodo disponibile o selezionato.")
+    # Se c'è un'istanza warmed prende quella
+    if function_name in function_state_registry:
+        for n, state in function_state_registry[function_name].items():
+            if state == "warmed":
+                node_name = n
+                execution_mode = "Warmed"
+                break
     
+    # Se non ci sono istanze warmed, uso la policy di scheduling
+    metric_to_write = None
+    if not node_name:
+        selected_node, metric_to_write = await SCHEDULING_POLICY["instance"].select_node(node_registry, function_name)
+        if not selected_node:
+            raise HTTPException(status_code=503, detail="Nessun nodo disponibile o selezionato dalla policy.")
+        
+        node_name = selected_node
+        # Controllo se per caso il nodo scelto è pre-warmed
+        if function_name in function_state_registry and node_name in function_state_registry[function_name]:
+            if function_state_registry[function_name][node_name] == "pre-warmed":
+                execution_mode = "Pre-warmed"
+
     node_info = node_registry[node_name]
     docker_image = function_registry[function_name]
 
     try:
-        is_warmed = req.execution_mode == "warmed"
-        is_pre_warmed = req.execution_mode == "pre-warmed"
-
-        if is_warmed:
+        if execution_mode == "Warmed":
             container_name = f"warmed--{function_name}--{node_name}"
-            output = await _run_ssh_command_async(node_info, f"sudo docker logs {container_name}")
+            command_to_run = function_registry[function_name].split(" ", 1)[1] # Estrae il comando
+            # Uso docker exec per eseguire lo script nel container già attivo
+            output = await _run_ssh_command_async(node_info, f"sudo docker exec {container_name} {command_to_run}")
         else:
             output = await _run_docker_on_node_async(node_info, docker_image)
-        
+            # Se era pre-warmed, ora è "usato", quindi torna cold.
+            if execution_mode == "Pre-warmed":
+                function_state_registry[function_name][node_name] = "cold"
+
         end_time = time.perf_counter()
         duration = end_time - start_time
 
-        if metric_to_write:
-            metric_to_write["Execution Time (s)"] = f"{duration:.4f}"
-            if is_warmed:
-                metric_to_write["Execution Mode"] = "Warmed"
-            elif is_pre_warmed:
-                metric_to_write["Execution Mode"] = "Pre-warmed"
-            else:
-                metric_to_write["Execution Mode"] = "Cold"
-            write_metrics_to_csv(metric_to_write)
-        
+        if not metric_to_write:
+            metric_to_write = { "Function": function_name, "Node": node_name, "CPU Usage % ": "---", "RAM Usage %": "---", "Policy": "Warmed Override" }
+
+        metric_to_write["Execution Time (s)"] = f"{duration:.4f}"
+        metric_to_write["Execution Mode"] = execution_mode
+        write_metrics_to_csv(metric_to_write)
         format_csv_as_table()
 
     except Exception as e:
@@ -297,50 +315,43 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
         print(f"Invocazione fallita dopo {duration:.4f} secondi.")
         raise HTTPException(status_code=500, detail=f"Invocazione della funzione fallita: {e}")
 
-@app.post("/functions/prewarm")
-async def prewarm_function(function_name: str):
-    """
-    Esegue un 'docker pull' dell'immagine di una funzione su un nodo specifico.
-    """
-    if function_name not in function_registry:
-        raise HTTPException(status_code=404, detail="Funzione non trovata.")
-
-    node_name, _ = await LeastUsedNodeSelectionPolicy().select_node(node_registry, function_name)
-    if not node_name:
-        raise HTTPException(status_code=404, detail="Nodo non trovato.")
+async def _prewarm_function_on_node(function_name: str, node_name: str):
+    """Esegue un docker pull su node_name e aggiorna lo stato a pre-warmed"""
+    if function_name not in function_registry or node_name not in node_registry:
+        return
 
     node_info = node_registry[node_name]
-    docker_image = function_registry[function_name]
-    
-    try:
-        output = await _run_ssh_command_async(node_info, f"sudo docker pull {docker_image}")
-        return { "node_name": node_name }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    docker_image = function_registry[function_name].split()[0] # Prende solo l'immagine
 
-@app.post("/functions/warmup")
-async def warmup_function(function_name: str):
-    """
-    Avvia un'istanza di una funzione in background (detached) su un nodo specifico,
-    simulando un container 'warmed'.
-    """
-    if function_name not in function_registry:
-        raise HTTPException(status_code=404, detail="Funzione non trovata.")
-    
-    node_name, _ = await LeastUsedNodeSelectionPolicy().select_node(node_registry, function_name)
-    if not node_name:
-        raise HTTPException(status_code=404, detail="Nodo non trovato.")
+    try:
+        await _run_ssh_command_async(node_info, f"sudo docker pull {docker_image}")
+        
+        if function_name not in function_state_registry:
+            function_state_registry[function_name] = {}
+        function_state_registry[function_name][node_name] = "pre-warmed"
+    except Exception as e:
+        print(f"Errore durante il pre-warm di '{function_name}' su '{node_name}': {e}")
+
+
+async def _warmup_function_on_node(function_name: str, node_name: str):
+    """Avvia un container in background su node_name e aggiorna lo stato a warmed"""
+    if function_name not in function_registry or node_name not in node_registry:
+        return
 
     node_info = node_registry[node_name]
     docker_image_and_command = function_registry[function_name]
+    docker_image = docker_image_and_command.split()[0] # Prende solo l'immagine
+    warmed_command = "python warmed_function.py"
+    docker_image_and_command_warmed = f"{docker_image} {warmed_command}"
+    
     container_name = f"warmed--{function_name}--{node_name}"
 
-    await _run_ssh_command_async(node_info, f"sudo docker rm -f {container_name}")
-
-    docker_cmd = f"sudo docker run -d --name {container_name} {docker_image_and_command}"
-    
     try:
-        container_id = await _run_ssh_command_async(node_info, docker_cmd)
-        return { "node_name": node_name }
+        docker_cmd = f"sudo docker run -d --name {container_name} {docker_image_and_command_warmed}"
+        await _run_ssh_command_async(node_info, docker_cmd)
+        
+        if function_name not in function_state_registry:
+            function_state_registry[function_name] = {}
+        function_state_registry[function_name][node_name] = "warmed"
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Errore durante il warm-up di '{function_name}' su '{node_name}': {e}")
