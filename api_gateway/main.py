@@ -18,6 +18,7 @@ app = FastAPI(
 function_registry: Dict[str, str] = {}
 node_registry: Dict[str, Dict[str, Any]] = {}
 function_state_registry: Dict[str, Dict[str, str]] = {}
+metrics_log: List[Dict[str, Any]] = []
 
 class RegisterFunctionRequest(BaseModel):
     name: str = Field(..., description="Il nome univoco della funzione da registrare.")
@@ -177,29 +178,18 @@ SCHEDULING_POLICY = {
     "instance": LeastUsedNodeSelectionPolicy()
 }
 
-def write_metrics_to_csv(metrics_data: Dict[str, Any], filename: str = "metrics.csv"):
-    file_path = os.path.join("/app", filename)
-    df = pd.DataFrame([metrics_data])
-    write_header = not os.path.exists(file_path) or os.path.getsize(file_path) == 0
+def write_metrics_table(output_file="metrics_table.txt"):
+    if not metrics_log:
+        return
 
-    df.to_csv(file_path, mode='a', header=write_header, index=False)
-
-def format_csv_as_table(input_file="metrics.csv", output_file="metrics_table.txt"):
-    if not os.path.exists(input_file):
-        print(f"Il file {input_file} non esiste.")
-        return False
-    
     try:
-        df = pd.read_csv(input_file)
+        df = pd.DataFrame(metrics_log)
         table = tabulate(df, headers='keys', tablefmt='grid', showindex=False)
-        
+
         with open(output_file, 'w') as f:
             f.write(table)
-                
-        return True
     except Exception as e:
-        print(f"Errore durante la formattazione: {e}")
-        return False
+        print(f"Errore durante la scrittura della tabella delle metriche: {e}")
 
 def clean(filename):
     file_path = os.path.join("/app", filename)
@@ -212,7 +202,7 @@ def clean(filename):
 
 @app.post("/init")
 def init():
-    clean("metrics.csv")
+    metrics_log.clear()
     clean("metrics_table.txt")
 
 @app.post("/functions/register")
@@ -312,8 +302,8 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
 
         metric_to_write["Execution Time (s)"] = f"{duration:.4f}"
         metric_to_write["Execution Mode"] = execution_mode
-        write_metrics_to_csv(metric_to_write)
-        format_csv_as_table()
+        metrics_log.append(metric_to_write)
+        write_metrics_table()
 
     except Exception as e:
         end_time = time.perf_counter()
