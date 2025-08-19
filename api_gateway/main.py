@@ -262,6 +262,7 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
 
     node_name = None
     execution_mode = "Cold"
+    metric_to_write = None
 
     # Se c'è un'istanza warmed prende quella
     if function_name in function_state_registry:
@@ -270,19 +271,22 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
                 node_name = n
                 execution_mode = "Warmed"
                 break
+
+    # Altrimenti se c'è un'istanza pre-warmed prende quella
+    if not node_name and function_name in function_state_registry:
+        for n, state in function_state_registry[function_name].items():
+            if state == "pre-warmed":
+                node_name = n
+                execution_mode = "Pre-warmed"
+                break
     
-    # Se non ci sono istanze warmed, uso la policy di scheduling
-    metric_to_write = None
+    # Altrimenti uso la policy di scheduling
     if not node_name:
         selected_node, metric_to_write = await SCHEDULING_POLICY["instance"].select_node(node_registry, function_name)
         if not selected_node:
             raise HTTPException(status_code=503, detail="Nessun nodo disponibile o selezionato dalla policy.")
-        
+
         node_name = selected_node
-        # Controllo se per caso il nodo scelto è pre-warmed
-        if function_name in function_state_registry and node_name in function_state_registry[function_name]:
-            if function_state_registry[function_name][node_name] == "pre-warmed":
-                execution_mode = "Pre-warmed"
 
     node_info = node_registry[node_name]
     function_details = function_registry[function_name]
