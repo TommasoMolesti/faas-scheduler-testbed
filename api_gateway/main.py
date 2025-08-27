@@ -336,13 +336,11 @@ async def _warmup_function_on_node(function_name: str, node_name: str):
 
     node_info = node_registry[node_name]
     docker_image = function_registry[function_name]["image"]
-    warmed_command = "python warmed_function.py"
-    docker_image_and_command_warmed = f"{docker_image} {warmed_command}"
-    
     container_name = f"warmed--{function_name}--{node_name}"
 
     try:
-        docker_cmd = f"sudo docker run -d --name {container_name} {docker_image_and_command_warmed}"
+        # Avvio il nuovo container usando "sleep infinity" per mantenerlo attivo
+        docker_cmd = f"sudo docker run -d --name {container_name} {docker_image} sleep infinity"
         await _run_ssh_command_async(node_info, docker_cmd)
         
         if function_name not in function_state_registry:
