@@ -339,6 +339,9 @@ async def _warmup_function_on_node(function_name: str, node_name: str):
     container_name = f"warmed--{function_name}--{node_name}"
 
     try:
+        # Pulisco eventuali container vecchi con lo stesso nome per evitare conflitti.
+        await _run_ssh_command_async(node_info, f"sudo docker rm -f {container_name}")
+
         # Avvio il nuovo container usando "sleep infinity" per mantenerlo attivo
         docker_cmd = f"sudo docker run -d --name {container_name} {docker_image} sleep infinity"
         await _run_ssh_command_async(node_info, docker_cmd)
