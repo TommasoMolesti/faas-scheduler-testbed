@@ -1,9 +1,4 @@
 services:
-  function:
-      build:
-        context: ./functions
-        dockerfile: Dockerfile
-      image: python-function-base
   api_gateway:
     build:
       context: ./api_gateway

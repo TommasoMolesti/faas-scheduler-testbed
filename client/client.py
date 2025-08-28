@@ -5,7 +5,7 @@ from typing import Optional, Any, List
 
 BASE_URL = "http://api_gateway:8000"
 
-DOCKER_IMAGE = "python-function-base"
+DOCKER_IMAGE = "tommasomolesti/custom_python_heavy:v2"
 COMMAND = "python loop_function.py"
 NUM_FUNCTIONS = 20
 USER = "sshuser"
