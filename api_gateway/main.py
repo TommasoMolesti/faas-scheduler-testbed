@@ -89,7 +89,7 @@ class RoundRobinPolicy():
                 "Node": selected_node,
                 "CPU Usage % ": "N/A",
                 "RAM Usage %": "N/A",
-                "Policy": "Round Robin"
+                "Execution Mode": "Round Robin - Cold"
             }
             return selected_node, metric_entry
         except StopIteration:
@@ -153,7 +153,7 @@ class LeastUsedPolicy():
                 "Node": selected_node,
                 "CPU Usage % ": node_metrics[selected_node]['cpu_usage'],
                 "RAM Usage %": node_metrics[selected_node]['ram_usage'],
-                "Policy": "Least Used"
+                "Execution Mode": "Least Used - Cold"
             }
             return selected_node, metric_entry
         
@@ -175,23 +175,22 @@ class CyclicWarmingPolicy():
 
 class WarmedFirstPolicy:
     """
-    Seleziona un nodo dando priorità allo stato della funzione (Warmed > Pre-warmed),
-    e come fallback utilizza una policy di scheduling generale.
+    Seleziona un nodo dando priorità a Warmed > Pre-warmed > Default Policy.
     """
     async def select_node(self, function_name: str):
         node_name = None
-        execution_mode = "Cold"
         metric_to_write = None
+        execution_mode = None
 
-        # Se c'è un'istanza warmed prende quella
+        # Priorità 1: Cerca un'istanza 'warmed'
         if function_name in function_state_registry:
             for n, state in function_state_registry[function_name].items():
                 if state == "warmed":
                     node_name = n
                     execution_mode = "Warmed"
                     break
-
-        # Altrimenti se c'è un'istanza pre-warmed prende quella
+        
+        # Priorità 2: Cerca un'istanza 'pre-warmed'
         if not node_name and function_name in function_state_registry:
             for n, state in function_state_registry[function_name].items():
                 if state == "pre-warmed":
@@ -199,62 +198,53 @@ class WarmedFirstPolicy:
                     execution_mode = "Pre-warmed"
                     break
 
-        # Altrimenti uso la policy di scheduling (Cold, fallback)
+        # Priorità 3: Fallback sulla policy di scheduling
         if not node_name:
-            selected_node, metric_to_write = await DEFAULT_SCHEDULING_POLICY.select_node(node_registry, function_name)
-            if not selected_node:
-                raise HTTPException(status_code=503, detail="Nessun nodo disponibile o selezionato dalla policy.")
+            node_name, metric_to_write = await DEFAULT_SCHEDULING_POLICY.select_node(node_registry, function_name)
+            if not node_name:
+                raise HTTPException(status_code=503, detail="Nessun nodo disponibile.")
+            execution_mode = metric_to_write.get("Execution Mode", "Unknown")
 
-            node_name = selected_node
-
-        return node_name, execution_mode, metric_to_write
+        return node_name, metric_to_write, execution_mode
 
 class PreWarmedFirstPolicy:
     """
-    Seleziona un nodo dando priorità allo stato della funzione  (Pre-warmed),
-    e come fallback utilizza una policy di scheduling generale.
+    Seleziona un nodo dando priorità a Pre-warmed > Default Policy.
     """
     async def select_node(self, function_name: str):
         node_name = None
-        execution_mode = "Cold"
         metric_to_write = None
+        execution_mode = None
 
-        # Se c'è un'istanza pre-warmed prende quella
-        if not node_name and function_name in function_state_registry:
+        # Priorità 1: Cerca un'istanza 'pre-warmed'
+        if function_name in function_state_registry:
             for n, state in function_state_registry[function_name].items():
                 if state == "pre-warmed":
                     node_name = n
-                    execution_mode = "Pre-warmed"
+                    node_name = "Pre-warmed"
                     break
 
-        # Altrimenti uso la policy di scheduling (Cold, fallback)
+        # Priorità 2: Fallback sulla policy di scheduling
         if not node_name:
-            selected_node, metric_to_write = await DEFAULT_SCHEDULING_POLICY.select_node(node_registry, function_name)
-            if not selected_node:
-                raise HTTPException(status_code=503, detail="Nessun nodo disponibile o selezionato dalla policy.")
+            node_name, metric_to_write = await DEFAULT_SCHEDULING_POLICY.select_node(node_registry, function_name)
+            if not node_name:
+                raise HTTPException(status_code=503, detail="Nessun nodo disponibile.")
+            execution_mode = metric_to_write.get("Execution Mode", "Unknown")
 
-            node_name = selected_node
-
-        return node_name, execution_mode, metric_to_write
+        return node_name, metric_to_write, execution_mode
 
 class DefaultColdPolicy:
     """
-    Seleziona un nodo dando priorità allo stato della funzione  (Pre-warmed),
-    e come fallback utilizza una policy di scheduling generale.
+    Utilizza sempre la policy di scheduling di default per un'esecuzione Cold.
     """
     async def select_node(self, function_name: str):
-        node_name = None
-        execution_mode = "Cold"
-        metric_to_write = None
+        node_name, metric_to_write = await DEFAULT_SCHEDULING_POLICY.select_node(node_registry, function_name)
+        if not node_name:
+            raise HTTPException(status_code=503, detail="Nessun nodo disponibile.")
+        
+        execution_mode = metric_to_write.get("Execution Mode", "Unknown")
 
-        # Uso la policy di scheduling (esecuzione Cold)
-        selected_node, metric_to_write = await DEFAULT_SCHEDULING_POLICY.select_node(node_registry, function_name)
-        if not selected_node:
-            raise HTTPException(status_code=503, detail="Nessun nodo disponibile o selezionato dalla policy.")
-
-        node_name = selected_node
-
-        return node_name, execution_mode, metric_to_write
+        return node_name, metric_to_write, execution_mode
 
 # DEFAULT_SCHEDULING_POLICY = RoundRobinPolicy()
 DEFAULT_SCHEDULING_POLICY = LeastUsedPolicy()
@@ -331,7 +321,7 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
     if not node_registry:
         raise HTTPException(status_code=503, detail="Nessun nodo disponibile per l'esecuzione.")
 
-    node_name, execution_mode, metric_to_write = await NODE_SELECTION_POLICY.select_node(function_name)
+    node_name, metric_to_write, execution_mode = await NODE_SELECTION_POLICY.select_node(function_name)
 
     node_info = node_registry[node_name]
     function_details = function_registry[function_name]
@@ -353,10 +343,10 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
         duration = end_time - start_time
 
         if not metric_to_write:
-            metric_to_write = { "Function": function_name, "Node": node_name, "CPU Usage % ": "---", "RAM Usage %": "---", "Policy": "Warmed Override" }
+            metric_to_write = { "Function": function_name, "Node": node_name, "CPU Usage % ": "---", "RAM Usage %": "---" }
 
-        metric_to_write["Execution Time (s)"] = f"{duration:.4f}"
         metric_to_write["Execution Mode"] = execution_mode
+        metric_to_write["Execution Time (s)"] = f"{duration:.4f}"
         metrics_log.append(metric_to_write)
         write_metrics_table()
 
