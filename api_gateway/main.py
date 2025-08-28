@@ -221,7 +221,7 @@ class PreWarmedFirstPolicy:
             for n, state in function_state_registry[function_name].items():
                 if state == "pre-warmed":
                     node_name = n
-                    node_name = "Pre-warmed"
+                    execution_mode = "Pre-warmed"
                     break
 
         # Priorità 2: Fallback sulla policy di scheduling
