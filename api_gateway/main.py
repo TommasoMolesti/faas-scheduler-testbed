@@ -327,16 +327,19 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
     function_details = function_registry[function_name]
 
     try:
+        command_to_run = function_details["command"]
         if execution_mode == "Warmed":
             container_name = f"warmed--{function_name}--{node_name}"
-            command_to_run = function_details["command"]
             # Uso docker exec per eseguire lo script nel container già attivo
             output = await _run_ssh_command_async(node_info, f"sudo docker exec {container_name} {command_to_run}")
         else:
-            image_and_command = f'{function_details["image"]} {function_details["command"]}'
+            image_name = function_details["image"]
+            image_and_command = f'{image_name} {command_to_run}'
             output = await _run_docker_on_node_async(node_info, image_and_command)
-            # Se era pre-warmed, ora è "usato", quindi torna cold.
+            # Se era pre-warmed, ora è "usato", quindi viene rimossa l'immagine e torna cold.
             if execution_mode == "Pre-warmed":
+                remove_command = f"sudo docker rmi {image_name}"
+                await _run_ssh_command_async(node_info, remove_command)
                 function_state_registry[function_name][node_name] = "cold"
 
         end_time = time.perf_counter()
