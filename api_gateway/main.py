@@ -62,16 +62,7 @@ async def _run_docker_on_node_async(node_info: Dict[str, Any], docker_image: str
     docker_cmd = f"sudo docker run --rm {docker_image}"
     return await _run_ssh_command_async(node_info, docker_cmd)
 
-class NodeSelectionPolicy:
-    """
-    Classe base per la politica di selezione del nodo.
-    Sovrascrivi 'select_node' per politiche personalizzate.
-    Politica di default: sceglie il primo disponibile
-    """
-    async def select_node(self, nodes: Dict[str, Dict[str, Any]], function_name: str) -> Optional[str]:
-        return next(iter(nodes.keys())) if nodes else None
-
-class RoundRobinNodeSelectionPolicy(NodeSelectionPolicy):
+class RoundRobinPolicy():
     """
     Politica di selezione del nodo Round Robin.
     Seleziona i nodi in modo sequenziale per distribuire il carico.
@@ -104,7 +95,7 @@ class RoundRobinNodeSelectionPolicy(NodeSelectionPolicy):
         except StopIteration:
             return None, None
 
-class LeastUsedNodeSelectionPolicy(NodeSelectionPolicy):
+class LeastUsedPolicy():
     """
     Politica di selezione del nodo Least Used.
     Seleziona il nodo con il carico medio più basso.
@@ -168,15 +159,111 @@ class LeastUsedNodeSelectionPolicy(NodeSelectionPolicy):
         
         return None, None
 
-# SCHEDULING_POLICY = {
-#     "name": "Round Robin",
-#     "instance": RoundRobinNodeSelectionPolicy()
-# }
+class CyclicWarmingPolicy():
+    """
+    Policy che esegue il pre-warm e il warm in modo ciclico
+    in base all'ordine di registrazione delle funzioni.
+    """
+    async def apply(self, function_name: str, node_name: str):
+        # Ogni 3 funzioni ne preparo una "pre-warmed"
+        if len(function_registry) % 3 == 1:
+            await _prewarm_function_on_node(function_name, node_name)
 
-SCHEDULING_POLICY = {
-    "name": "Least Used",
-    "instance": LeastUsedNodeSelectionPolicy()
-}
+        # Ogni 3 funzioni (con offset 2) ne preparo una "warmed"
+        if len(function_registry) % 3 == 2:
+            await _warmup_function_on_node(function_name, node_name)
+
+class WarmedFirstPolicy:
+    """
+    Seleziona un nodo dando priorità allo stato della funzione (Warmed > Pre-warmed),
+    e come fallback utilizza una policy di scheduling generale.
+    """
+    async def select_node(self, function_name: str):
+        node_name = None
+        execution_mode = "Cold"
+        metric_to_write = None
+
+        # Se c'è un'istanza warmed prende quella
+        if function_name in function_state_registry:
+            for n, state in function_state_registry[function_name].items():
+                if state == "warmed":
+                    node_name = n
+                    execution_mode = "Warmed"
+                    break
+
+        # Altrimenti se c'è un'istanza pre-warmed prende quella
+        if not node_name and function_name in function_state_registry:
+            for n, state in function_state_registry[function_name].items():
+                if state == "pre-warmed":
+                    node_name = n
+                    execution_mode = "Pre-warmed"
+                    break
+
+        # Altrimenti uso la policy di scheduling (Cold, fallback)
+        if not node_name:
+            selected_node, metric_to_write = await DEFAULT_SCHEDULING_POLICY.select_node(node_registry, function_name)
+            if not selected_node:
+                raise HTTPException(status_code=503, detail="Nessun nodo disponibile o selezionato dalla policy.")
+
+            node_name = selected_node
+
+        return node_name, execution_mode, metric_to_write
+
+class PreWarmedFirstPolicy:
+    """
+    Seleziona un nodo dando priorità allo stato della funzione  (Pre-warmed),
+    e come fallback utilizza una policy di scheduling generale.
+    """
+    async def select_node(self, function_name: str):
+        node_name = None
+        execution_mode = "Cold"
+        metric_to_write = None
+
+        # Se c'è un'istanza pre-warmed prende quella
+        if not node_name and function_name in function_state_registry:
+            for n, state in function_state_registry[function_name].items():
+                if state == "pre-warmed":
+                    node_name = n
+                    execution_mode = "Pre-warmed"
+                    break
+
+        # Altrimenti uso la policy di scheduling (Cold, fallback)
+        if not node_name:
+            selected_node, metric_to_write = await DEFAULT_SCHEDULING_POLICY.select_node(node_registry, function_name)
+            if not selected_node:
+                raise HTTPException(status_code=503, detail="Nessun nodo disponibile o selezionato dalla policy.")
+
+            node_name = selected_node
+
+        return node_name, execution_mode, metric_to_write
+
+class DefaultColdPolicy:
+    """
+    Seleziona un nodo dando priorità allo stato della funzione  (Pre-warmed),
+    e come fallback utilizza una policy di scheduling generale.
+    """
+    async def select_node(self, function_name: str):
+        node_name = None
+        execution_mode = "Cold"
+        metric_to_write = None
+
+        # Uso la policy di scheduling (esecuzione Cold)
+        selected_node, metric_to_write = await DEFAULT_SCHEDULING_POLICY.select_node(node_registry, function_name)
+        if not selected_node:
+            raise HTTPException(status_code=503, detail="Nessun nodo disponibile o selezionato dalla policy.")
+
+        node_name = selected_node
+
+        return node_name, execution_mode, metric_to_write
+
+# DEFAULT_SCHEDULING_POLICY = RoundRobinPolicy()
+DEFAULT_SCHEDULING_POLICY = LeastUsedPolicy()
+
+WARMING_POLICY = CyclicWarmingPolicy()
+
+# NODE_SELECTION_POLICY = PreWarmedFirstPolicy()
+NODE_SELECTION_POLICY = WarmedFirstPolicy()
+# NODE_SELECTION_POLICY = DefaultColdPolicy()
 
 def write_metrics_table(output_file="metrics_table.txt"):
     if not metrics_log:
@@ -211,15 +298,9 @@ async def register_function(req: RegisterFunctionRequest):
         raise HTTPException(status_code=400, detail=f"Funzione '{req.name}' già registrata.")
     function_registry[req.name] = {"image": req.image, "command": req.command}
 
-    node_name, _ = await SCHEDULING_POLICY["instance"].select_node(node_registry, req.name)
+    node_name, _ = await DEFAULT_SCHEDULING_POLICY.select_node(node_registry, req.name)
 
-    # Ogni 3 funzioni ne preparo una "pre-warmed"
-    if len(function_registry) % 3 == 1:
-        await _prewarm_function_on_node(req.name, node_name)
-
-    # Ogni 3 funzioni (con offset 2) ne preparo una "warmed"
-    if len(function_registry) % 3 == 2:
-        await _warmup_function_on_node(req.name, node_name)
+    await WARMING_POLICY.apply(req.name, node_name)
 
 
 @app.get("/functions")
@@ -250,33 +331,7 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
     if not node_registry:
         raise HTTPException(status_code=503, detail="Nessun nodo disponibile per l'esecuzione.")
 
-    node_name = None
-    execution_mode = "Cold"
-    metric_to_write = None
-
-    # Se c'è un'istanza warmed prende quella
-    if function_name in function_state_registry:
-        for n, state in function_state_registry[function_name].items():
-            if state == "warmed":
-                node_name = n
-                execution_mode = "Warmed"
-                break
-
-    # Altrimenti se c'è un'istanza pre-warmed prende quella
-    if not node_name and function_name in function_state_registry:
-        for n, state in function_state_registry[function_name].items():
-            if state == "pre-warmed":
-                node_name = n
-                execution_mode = "Pre-warmed"
-                break
-    
-    # Altrimenti uso la policy di scheduling
-    if not node_name:
-        selected_node, metric_to_write = await SCHEDULING_POLICY["instance"].select_node(node_registry, function_name)
-        if not selected_node:
-            raise HTTPException(status_code=503, detail="Nessun nodo disponibile o selezionato dalla policy.")
-
-        node_name = selected_node
+    node_name, execution_mode, metric_to_write = await NODE_SELECTION_POLICY.select_node(function_name)
 
     node_info = node_registry[node_name]
     function_details = function_registry[function_name]
