@@ -55,13 +55,6 @@ async def _run_ssh_command_async(node_info: Dict[str, Any], command: str) -> str
         raise Exception(f"Errore inatteso durante l'esecuzione SSH asincrona: {e}")
 
 
-async def _run_docker_on_node_async(node_info: Dict[str, Any], docker_image: str) -> str:
-    """
-    Esegue un'immagine Docker su un nodo via SSH in modo asincrono.
-    """
-    docker_cmd = f"sudo docker run --rm {docker_image}"
-    return await _run_ssh_command_async(node_info, docker_cmd)
-
 class RoundRobinPolicy():
     """
     Politica di selezione del nodo Round Robin.
@@ -292,7 +285,6 @@ async def register_function(req: RegisterFunctionRequest):
 
     await WARMING_POLICY.apply(req.name, node_name)
 
-
 @app.get("/functions")
 def list_functions() -> Dict[str, str]:
     return function_registry
@@ -335,14 +327,16 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
             end_time = time.perf_counter()
         else:
             image_name = function_details["image"]
-            image_and_command = f'{image_name} {command_to_run}'
-            output = await _run_docker_on_node_async(node_info, image_and_command)
+            docker_cmd = f"sudo docker run --rm {image_name} {command_to_run}"
+            output = await _run_ssh_command_async(node_info, docker_cmd)
+
             end_time = time.perf_counter()
-            # Se era pre-warmed, ora è "usato", quindi viene rimossa l'immagine e torna cold.
+            # Se era pre-warmed, ora è "usato".
             if execution_mode == "Pre-warmed":
+                function_state_registry[function_name][node_name] = "cold"
+            if "Cold" in execution_mode:
                 remove_command = f"sudo docker rmi {image_name}"
                 await _run_ssh_command_async(node_info, remove_command)
-                function_state_registry[function_name][node_name] = "cold"
 
         duration = end_time - start_time
 
