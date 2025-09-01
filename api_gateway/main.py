@@ -19,6 +19,7 @@ function_registry: Dict[str, str] = {}
 node_registry: Dict[str, Dict[str, Any]] = {}
 function_state_registry: Dict[str, Dict[str, str]] = {}
 metrics_log: List[Dict[str, Any]] = []
+first = True
 
 class RegisterFunctionRequest(BaseModel):
     name: str = Field(..., description="Il nome univoco della funzione da registrare.")
@@ -269,11 +270,14 @@ def clean(filename):
 
 @app.post("/init")
 def init():
-    metrics_log.clear()
     clean("metrics_table.txt")
 
 @app.post("/functions/register")
 async def register_function(req: RegisterFunctionRequest):
+    global first
+    if first:
+        init()
+        first = False
     if req.name in function_registry:
         raise HTTPException(status_code=400, detail=f"Funzione '{req.name}' già registrata.")
     function_registry[req.name] = {"image": req.image, "command": req.command, "invocations": 0}
