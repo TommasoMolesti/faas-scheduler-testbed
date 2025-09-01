@@ -175,63 +175,33 @@ class CyclicWarmingPolicy:
 
 class WarmedFirstPolicy:
     """
-    Seleziona un nodo dando priorità a Warmed > Pre-warmed > Default Policy.
+    Seleziona un nodo dando priorità a Warmed.
+    Se fallisce, delega alla PreWarmedFirstPolicy.
     """
     async def select_node(self, function_name: str):
-        node_name = None
-        metric_to_write = None
-        execution_mode = None
-
         # Priorità 1: Cerca un'istanza 'warmed'
         if function_name in function_state_registry:
             for n, state in function_state_registry[function_name].items():
                 if state == "warmed":
-                    node_name = n
-                    execution_mode = "Warmed"
-                    break
-        
-        # Priorità 2: Cerca un'istanza 'pre-warmed'
-        if not node_name and function_name in function_state_registry:
-            for n, state in function_state_registry[function_name].items():
-                if state == "pre-warmed":
-                    node_name = n
-                    execution_mode = "Pre-warmed"
-                    break
+                    return n, None, "Warmed"
 
-        # Priorità 3: Fallback sulla policy di scheduling
-        if not node_name:
-            node_name, metric_to_write = await DEFAULT_SCHEDULING_POLICY.select_node(node_registry, function_name)
-            if not node_name:
-                raise HTTPException(status_code=503, detail="Nessun nodo disponibile.")
-            execution_mode = metric_to_write.get("Execution Mode", "Unknown")
-
-        return node_name, metric_to_write, execution_mode
+        # Priorità 2: Fallback alla policy successiva nella catena
+        return await PreWarmedFirstPolicy().select_node(function_name)
 
 class PreWarmedFirstPolicy:
     """
-    Seleziona un nodo dando priorità a Pre-warmed > Default Policy.
+    Seleziona un nodo dando priorità a Pre-warmed.
+    Se fallisce, delega alla DefaultColdPolicy.
     """
     async def select_node(self, function_name: str):
-        node_name = None
-        metric_to_write = None
-        execution_mode = None
-
         # Priorità 1: Cerca un'istanza 'pre-warmed'
         if function_name in function_state_registry:
             for n, state in function_state_registry[function_name].items():
                 if state == "pre-warmed":
-                    node_name = n
-                    execution_mode = "Pre-warmed"
-                    break
+                    return n, None, "Pre-warmed"
 
-        # Priorità 2: Fallback sulla policy di scheduling
-        if not node_name:
-            node_name, metric_to_write = await DEFAULT_SCHEDULING_POLICY.select_node(node_registry, function_name)
-            if not node_name:
-                raise HTTPException(status_code=503, detail="Nessun nodo disponibile.")
-            execution_mode = metric_to_write.get("Execution Mode", "Unknown")
-
-        return node_name, metric_to_write, execution_mode
+        # Priorità 2: Fallback alla policy successiva nella catena
+        return await DefaultColdPolicy().select_node(function_name)
 
 class DefaultColdPolicy:
     """
