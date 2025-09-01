@@ -9,6 +9,8 @@ from tabulate import tabulate
 import time
 import asyncio
 import asyncssh
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 app = FastAPI(
     title="FaaS Gateway",
@@ -319,6 +321,8 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
         metric_to_write["Execution Time (s)"] = f"{duration:.4f}"
         metrics_log.append(metric_to_write)
         write_metrics_table()
+        generate_boxplot_from_metrics()
+        generate_barchart_from_metrics()
 
         await WARMING_POLICY.apply(function_name)
 
@@ -365,3 +369,71 @@ async def _warmup_function_on_node(function_name: str, node_name: str):
         function_state_registry[function_name][node_name] = "warmed"
     except Exception as e:
         print(f"Errore durante il warm-up di '{function_name}' su '{node_name}': {e}")
+
+def generate_boxplot_from_metrics(output_file="metrics_boxplot.png"):
+    """
+    Genera un box plot delle performance di esecuzione e lo salva come immagine.
+    """
+    if not metrics_log:
+        return
+
+    try:
+        df = pd.DataFrame(metrics_log)
+
+        df['Execution Time (s)'] = pd.to_numeric(df['Execution Time (s)'])
+        df['Category'] = df['Execution Mode'].apply(lambda mode: 'Cold' if 'Cold' in mode else mode)
+
+        plt.style.use('seaborn-v0_8-whitegrid')
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        sns.boxplot(
+            x='Category',
+            y='Execution Time (s)',
+            data=df,
+            order=['Cold', 'Pre-warmed', 'Warmed'],
+            palette='viridis',
+            hue='Category',
+            legend=False,
+            ax=ax
+        )
+
+        ax.set_title('Distribuzione dei Tempi di Esecuzione per Modalità', fontsize=16)
+        ax.set_xlabel('Modalità di Esecuzione', fontsize=12)
+        ax.set_ylabel('Tempo di Esecuzione (s)', fontsize=12)
+
+        plt.savefig(output_file)
+        plt.close(fig)
+
+    except Exception as e:
+        print(f"Errore durante la generazione del box plot: {e}")
+
+def generate_barchart_from_metrics(output_file="metrics_barchart.png"):
+    """
+    Genera un grafico a barre per confrontare i tempi di esecuzione medi.
+    """
+    if not metrics_log:
+        return
+
+    try:
+        df = pd.DataFrame(metrics_log)
+        df['Execution Time (s)'] = pd.to_numeric(df['Execution Time (s)'])
+        df['Category'] = df['Execution Mode'].apply(lambda mode: 'Cold' if 'Cold' in mode else mode)
+
+        mean_times = df.groupby('Category')['Execution Time (s)'].mean().reindex(['Cold', 'Pre-warmed', 'Warmed'])
+
+        plt.style.use('seaborn-v0_8-whitegrid')
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        mean_times.plot(kind='bar', ax=ax, color=['#FF5733', '#33C1FF', '#33FF57'], rot=0)
+
+        ax.set_title('Confronto Tempo di Esecuzione Medio per Modalità', fontsize=16)
+        ax.set_xlabel('Modalità di Esecuzione', fontsize=12)
+        ax.set_ylabel('Tempo Medio di Esecuzione (s)', fontsize=12)
+
+        for container in ax.containers:
+            ax.bar_label(container, fmt='%.4f')
+
+        plt.savefig(output_file)
+        plt.close(fig)
+    except Exception as e:
+        print(f"Errore durante la generazione del bar chart: {e}")
