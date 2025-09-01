@@ -152,19 +152,18 @@ class LeastUsedPolicy():
         
         return None, None
 
-class CyclicWarmingPolicy():
-    """
-    Policy che esegue il pre-warm e il warm in modo ciclico
-    in base all'ordine di registrazione delle funzioni.
-    """
-    async def apply(self, function_name: str, node_name: str):
-        # Ogni 3 funzioni ne preparo una "pre-warmed"
-        if len(function_registry) % 3 == 1:
-            await _prewarm_function_on_node(function_name, node_name)
+class CyclicWarmingPolicy:
+    """Policy che determina lo stato futuro di una funzione in modo ciclico."""
+    def get_next_state(self, function_name: str) -> Optional[str]:
+        # L'invocazione successiva a quella corrente
+        next_policy_index = function_registry[function_name]["invocations"] % 3
 
-        # Ogni 3 funzioni (con offset 2) ne preparo una "warmed"
-        if len(function_registry) % 3 == 2:
-            await _warmup_function_on_node(function_name, node_name)
+        if next_policy_index == 1:
+            return "pre-warmed"
+        if next_policy_index == 2:
+            return "warmed"
+
+        return None
 
 class WarmedFirstPolicy:
     """
@@ -244,9 +243,7 @@ DEFAULT_SCHEDULING_POLICY = LeastUsedPolicy()
 
 WARMING_POLICY = CyclicWarmingPolicy()
 
-# NODE_SELECTION_POLICY = PreWarmedFirstPolicy()
-NODE_SELECTION_POLICY = WarmedFirstPolicy()
-# NODE_SELECTION_POLICY = DefaultColdPolicy()
+NODE_SELECTION_POLICY = [DefaultColdPolicy(), PreWarmedFirstPolicy(), WarmedFirstPolicy()]
 
 def write_metrics_table(output_file="metrics_table.txt"):
     if not metrics_log:
@@ -279,11 +276,7 @@ def init():
 async def register_function(req: RegisterFunctionRequest):
     if req.name in function_registry:
         raise HTTPException(status_code=400, detail=f"Funzione '{req.name}' già registrata.")
-    function_registry[req.name] = {"image": req.image, "command": req.command}
-
-    node_name, _ = await DEFAULT_SCHEDULING_POLICY.select_node(node_registry, req.name)
-
-    await WARMING_POLICY.apply(req.name, node_name)
+    function_registry[req.name] = {"image": req.image, "command": req.command, "invocations": 0}
 
 @app.get("/functions")
 def list_functions() -> Dict[str, str]:
@@ -306,23 +299,22 @@ def list_nodes() -> Dict[str, Dict[str, Any]]:
 
 @app.post("/functions/invoke/{function_name}")
 async def invoke_function(function_name: str, req: InvokeFunctionRequest):
-    start_time = time.perf_counter()
-
     if function_name not in function_registry:
         raise HTTPException(status_code=404, detail=f"Funzione '{function_name}' non trovata.")
     if not node_registry:
         raise HTTPException(status_code=503, detail="Nessun nodo disponibile per l'esecuzione.")
 
-    node_name, metric_to_write, execution_mode = await NODE_SELECTION_POLICY.select_node(function_name)
+    function_details = function_registry[function_name]
+    policy_index = function_details["invocations"] % 3
+    node_name, metric_to_write, execution_mode = await NODE_SELECTION_POLICY[policy_index].select_node(function_name)
 
     node_info = node_registry[node_name]
-    function_details = function_registry[function_name]
+    start_time = time.perf_counter()
 
     try:
         command_to_run = function_details["command"]
         if execution_mode == "Warmed":
             container_name = f"warmed--{function_name}--{node_name}"
-            # Uso docker exec per eseguire lo script nel container già attivo
             output = await _run_ssh_command_async(node_info, f"sudo docker exec {container_name} {command_to_run}")
             end_time = time.perf_counter()
         else:
@@ -339,6 +331,7 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
                 await _run_ssh_command_async(node_info, remove_command)
 
         duration = end_time - start_time
+        function_details["invocations"] += 1
 
         if not metric_to_write:
             metric_to_write = { "Function": function_name, "Node": node_name, "CPU Usage % ": "---", "RAM Usage %": "---" }
@@ -347,6 +340,20 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
         metric_to_write["Execution Time (s)"] = f"{duration:.4f}"
         metrics_log.append(metric_to_write)
         write_metrics_table()
+
+        # Preparazione per la prossima invocazione della funzione
+        next_predicted_state = WARMING_POLICY.get_next_state(function_name)
+
+        if next_predicted_state:
+            node_to_prepare, _ = await DEFAULT_SCHEDULING_POLICY.select_node(node_registry, function_name)
+
+            if node_to_prepare:
+                if next_predicted_state == "pre-warmed":
+                    # La prossima esecuzione della funzione sarà pre-warmed
+                    await _prewarm_function_on_node(function_name, node_to_prepare)
+                elif next_predicted_state == "warmed":
+                    # La prossima esecuzione della funzione sarà warmed
+                    await _warmup_function_on_node(function_name, node_to_prepare)
 
     except Exception as e:
         end_time = time.perf_counter()

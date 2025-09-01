@@ -7,7 +7,7 @@ BASE_URL = "http://api_gateway:8000"
 
 DOCKER_IMAGE = "tommasomolesti/custom_python_heavy:v2"
 COMMAND = "python loop_function.py"
-NUM_FUNCTIONS = 20
+INVOCATIONS = 21
 USER = "sshuser"
 PASSWORD = "sshpassword"
 SSH_NODE_SERVICE_NAMES = [
@@ -103,8 +103,9 @@ if __name__ == "__main__":
     for service_name in SSH_NODE_SERVICE_NAMES:
         register_node(service_name, service_name, USER, PASSWORD, port=22)
     
-    for i in range(0, NUM_FUNCTIONS):
-        func_name = f"func-{i+1}"
-        
-        register_function(func_name, DOCKER_IMAGE, COMMAND)
+    func_name = f"fibonacci-func"
+    register_function(func_name, DOCKER_IMAGE, COMMAND)
+
+    for i in range(INVOCATIONS):
         invoke_function(func_name)
+        time.sleep(1)
