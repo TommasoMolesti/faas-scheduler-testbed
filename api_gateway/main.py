@@ -154,17 +154,24 @@ class LeastUsedPolicy():
         return None, None
 
 class CyclicWarmingPolicy:
-    """Policy che determina lo stato futuro di una funzione in modo ciclico."""
-    def get_next_state(self, function_name: str) -> Optional[str]:
-        # L'invocazione successiva a quella corrente
+    """Policy che determina e applica lo stato futuro di una funzione."""
+    async def apply(self, function_name: str):
+        # Determina quale dovrebbe essere lo stato per la prossima invocazione
         next_policy_index = function_registry[function_name]["invocations"] % 3
 
+        next_state = None
         if next_policy_index == 1:
-            return "pre-warmed"
-        if next_policy_index == 2:
-            return "warmed"
+            next_state = "pre-warmed"
+        elif next_policy_index == 2:
+            next_state = "warmed"
 
-        return None
+        if next_state:
+            node_to_prepare, _ = await DEFAULT_SCHEDULING_POLICY.select_node(node_registry, function_name)
+            if node_to_prepare:
+                if next_state == "pre-warmed":
+                    await _prewarm_function_on_node(function_name, node_to_prepare)
+                elif next_state == "warmed":
+                    await _warmup_function_on_node(function_name, node_to_prepare)
 
 class WarmedFirstPolicy:
     """
@@ -320,20 +327,18 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
         if execution_mode == "Warmed":
             container_name = f"warmed--{function_name}--{node_name}"
             output = await _run_ssh_command_async(node_info, f"sudo docker exec {container_name} {command_to_run}")
-            end_time = time.perf_counter()
         else:
             image_name = function_details["image"]
             docker_cmd = f"sudo docker run --rm {image_name} {command_to_run}"
             output = await _run_ssh_command_async(node_info, docker_cmd)
 
-            end_time = time.perf_counter()
-            # Se era pre-warmed, ora è "usato".
-            if execution_mode == "Pre-warmed":
-                function_state_registry[function_name][node_name] = "cold"
-            if "Cold" in execution_mode:
-                remove_command = f"sudo docker rmi {image_name}"
-                await _run_ssh_command_async(node_info, remove_command)
-
+        end_time = time.perf_counter()
+        # Se era pre-warmed, ora è "usato".
+        if execution_mode == "Pre-warmed":
+            function_state_registry[function_name][node_name] = "cold"
+        if "Cold" in execution_mode:
+            remove_command = f"sudo docker rmi {image_name}"
+            await _run_ssh_command_async(node_info, remove_command)
         duration = end_time - start_time
         function_details["invocations"] += 1
 
@@ -345,19 +350,7 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
         metrics_log.append(metric_to_write)
         write_metrics_table()
 
-        # Preparazione per la prossima invocazione della funzione
-        next_predicted_state = WARMING_POLICY.get_next_state(function_name)
-
-        if next_predicted_state:
-            node_to_prepare, _ = await DEFAULT_SCHEDULING_POLICY.select_node(node_registry, function_name)
-
-            if node_to_prepare:
-                if next_predicted_state == "pre-warmed":
-                    # La prossima esecuzione della funzione sarà pre-warmed
-                    await _prewarm_function_on_node(function_name, node_to_prepare)
-                elif next_predicted_state == "warmed":
-                    # La prossima esecuzione della funzione sarà warmed
-                    await _warmup_function_on_node(function_name, node_to_prepare)
+        await WARMING_POLICY.apply(function_name)
 
     except Exception as e:
         end_time = time.perf_counter()
@@ -393,9 +386,6 @@ async def _warmup_function_on_node(function_name: str, node_name: str):
     container_name = f"warmed--{function_name}--{node_name}"
 
     try:
-        # Pulisco eventuali container vecchi con lo stesso nome per evitare conflitti.
-        await _run_ssh_command_async(node_info, f"sudo docker rm -f {container_name}")
-
         # Avvio il nuovo container usando "sleep infinity" per mantenerlo attivo
         docker_cmd = f"sudo docker run -d --name {container_name} {docker_image} sleep infinity"
         await _run_ssh_command_async(node_info, docker_cmd)
