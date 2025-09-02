@@ -314,15 +314,7 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
         duration = end_time - start_time
         function_details["invocations"] += 1
 
-        if not metric_to_write:
-            metric_to_write = { "Function": function_name, "Node": node_name, "CPU Usage % ": "---", "RAM Usage %": "---" }
-
-        metric_to_write["Execution Mode"] = execution_mode
-        metric_to_write["Execution Time (s)"] = f"{duration:.4f}"
-        metrics_log.append(metric_to_write)
-        write_metrics_table()
-        generate_boxplot_from_metrics()
-        generate_barchart_from_metrics()
+        write_metrics(metric_to_write, function_name, node_name, execution_mode, duration)
 
         await WARMING_POLICY.apply(function_name)
 
@@ -369,6 +361,17 @@ async def _warmup_function_on_node(function_name: str, node_name: str):
         function_state_registry[function_name][node_name] = "warmed"
     except Exception as e:
         print(f"Errore durante il warm-up di '{function_name}' su '{node_name}': {e}")
+
+def write_metrics(metric_to_write, function_name, node_name, execution_mode, duration):
+    if not metric_to_write:
+        metric_to_write = { "Function": function_name, "Node": node_name, "CPU Usage % ": "---", "RAM Usage %": "---" }
+
+    metric_to_write["Execution Mode"] = execution_mode
+    metric_to_write["Execution Time (s)"] = f"{duration:.4f}"
+    metrics_log.append(metric_to_write)
+    write_metrics_table()
+    generate_boxplot_from_metrics()
+    generate_barchart_from_metrics()
 
 def generate_boxplot_from_metrics(output_file="metrics_boxplot.png"):
     """
