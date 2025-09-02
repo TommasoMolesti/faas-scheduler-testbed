@@ -304,7 +304,6 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
             docker_cmd = f"sudo docker run --rm {image_name} {command_to_run}"
             output = await _run_ssh_command_async(node_info, docker_cmd)
 
-        end_time = time.perf_counter()
         # Se era pre-warmed, ora è "usato".
         if execution_mode == "Pre-warmed":
             function_state_registry[function_name][node_name] = "cold"
@@ -314,9 +313,11 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
         duration = end_time - start_time
         function_details["invocations"] += 1
 
-        write_metrics(metric_to_write, function_name, node_name, execution_mode, duration)
-
         await WARMING_POLICY.apply(function_name)
+
+        end_time = time.perf_counter()
+
+        write_metrics(metric_to_write, function_name, node_name, execution_mode, duration)
 
     except Exception as e:
         end_time = time.perf_counter()
