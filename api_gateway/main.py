@@ -261,10 +261,6 @@ async def register_function(req: RegisterFunctionRequest):
         raise HTTPException(status_code=400, detail=f"Funzione '{req.name}' già registrata.")
     function_registry[req.name] = {"image": req.image, "command": req.command, "invocations": 0}
 
-@app.get("/functions")
-def list_functions() -> Dict[str, str]:
-    return function_registry
-
 @app.post("/nodes/register")
 def register_node(req: RegisterNodeRequest):
     if req.name in node_registry:
@@ -276,12 +272,9 @@ def register_node(req: RegisterNodeRequest):
         "password": req.password
     }
 
-@app.get("/nodes")
-def list_nodes() -> Dict[str, Dict[str, Any]]:
-    return {name: {k: v for k, v in info.items() if k != "password"} for name, info in node_registry.items()}
-
 @app.post("/functions/invoke/{function_name}")
 async def invoke_function(function_name: str, req: InvokeFunctionRequest):
+    start_time = time.perf_counter()
     if function_name not in function_registry:
         raise HTTPException(status_code=404, detail=f"Funzione '{function_name}' non trovata.")
     if not node_registry:
@@ -292,13 +285,13 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
     node_name, metric_to_write, execution_mode = await NODE_SELECTION_POLICY[policy_index].select_node(function_name)
 
     node_info = node_registry[node_name]
-    start_time = time.perf_counter()
 
     try:
         command_to_run = function_details["command"]
         if execution_mode == "Warmed":
             container_name = f"warmed--{function_name}--{node_name}"
-            output = await _run_ssh_command_async(node_info, f"sudo docker exec {container_name} {command_to_run}")
+            docker_cmd = f"sudo docker exec {container_name} {command_to_run}"
+            output = await _run_ssh_command_async(node_info, docker_cmd)
         else:
             image_name = function_details["image"]
             docker_cmd = f"sudo docker run --rm {image_name} {command_to_run}"
@@ -310,12 +303,12 @@ async def invoke_function(function_name: str, req: InvokeFunctionRequest):
         if "Cold" in execution_mode:
             remove_command = f"sudo docker rmi {image_name}"
             await _run_ssh_command_async(node_info, remove_command)
-        duration = end_time - start_time
         function_details["invocations"] += 1
 
         await WARMING_POLICY.apply(function_name)
 
         end_time = time.perf_counter()
+        duration = end_time - start_time
 
         write_metrics(metric_to_write, function_name, node_name, execution_mode, duration)
 
@@ -354,6 +347,8 @@ async def _warmup_function_on_node(function_name: str, node_name: str):
 
     try:
         # Avvio il nuovo container usando "sleep infinity" per mantenerlo attivo
+
+        # TODO : c'è la probabilità che un container così esista già, da fare il controllo prima senza starne a creare uno nuovo ?
         docker_cmd = f"sudo docker run -d --name {container_name} {docker_image} sleep infinity"
         await _run_ssh_command_async(node_info, docker_cmd)
         
