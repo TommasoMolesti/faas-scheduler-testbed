@@ -1,1 +1,1 @@
-docker-compose up --build
+python3 start.py
