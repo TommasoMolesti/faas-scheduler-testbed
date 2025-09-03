@@ -152,25 +152,17 @@ class LeastUsedPolicy():
         
         return None, None
 
-class CyclicWarmingPolicy:
-    """Policy che determina e applica lo stato futuro di una funzione."""
-    async def apply(self, function_name: str):
-        # Determina quale dovrebbe essere lo stato per la prossima invocazione
-        next_policy_index = function_registry[function_name]["invocations"] % 3
-
-        next_state = None
-        if next_policy_index == 1:
-            next_state = "pre-warmed"
-        elif next_policy_index == 2:
-            next_state = "warmed"
-
-        if next_state:
+class StaticWarmingPolicy:
+    """
+    Sceglie se fare warming o pre-warming in base al valore passato alla funzione in modo statico
+    """
+    async def apply(self, warming_type: str, function_name):
+        if warming_type == "pre-warmed":
             node_to_prepare, _ = await DEFAULT_SCHEDULING_POLICY.select_node(node_registry, function_name)
-            if node_to_prepare:
-                if next_state == "pre-warmed":
-                    await _prewarm_function_on_node(function_name, node_to_prepare)
-                elif next_state == "warmed":
-                    await _warmup_function_on_node(function_name, node_to_prepare)
+            await _prewarm_function_on_node(function_name, node_to_prepare)
+        elif warming_type == "warmed":
+            node_to_prepare, _ = await DEFAULT_SCHEDULING_POLICY.select_node(node_registry, function_name)
+            await _warmup_function_on_node(function_name, node_to_prepare)
 
 class WarmedFirstPolicy:
     """
@@ -218,9 +210,13 @@ class DefaultColdPolicy:
 # DEFAULT_SCHEDULING_POLICY = RoundRobinPolicy()
 DEFAULT_SCHEDULING_POLICY = LeastUsedPolicy()
 
-WARMING_POLICY = CyclicWarmingPolicy()
+# WARMING_TYPE = "cold"
+# WARMING_TYPE = "pre-warmed"
+WARMING_TYPE = "warmed"
 
-NODE_SELECTION_POLICY = [DefaultColdPolicy(), PreWarmedFirstPolicy(), WarmedFirstPolicy()]
+SCHEDULING_POLICY = StaticWarmingPolicy()
+
+NODE_SELECTION_POLICY = WarmedFirstPolicy()
 
 def write_metrics_table(output_file="metrics_table.txt"):
     if not metrics_log:
@@ -256,7 +252,9 @@ async def register_function(req: RegisterFunctionRequest):
         first = False
     if req.name in function_registry:
         raise HTTPException(status_code=400, detail=f"Funzione '{req.name}' già registrata.")
-    function_registry[req.name] = {"image": req.image, "command": req.command, "invocations": 0}
+    function_registry[req.name] = {"image": req.image, "command": req.command}
+
+    await SCHEDULING_POLICY.apply(WARMING_TYPE, req.name)
 
 @app.post("/nodes/register")
 def register_node(req: RegisterNodeRequest):
@@ -278,8 +276,7 @@ async def invoke_function(function_name: str):
         raise HTTPException(status_code=503, detail="Nessun nodo disponibile per l'esecuzione.")
 
     function_details = function_registry[function_name]
-    policy_index = function_details["invocations"] % 3
-    node_name, metric_to_write, execution_mode = await NODE_SELECTION_POLICY[policy_index].select_node(function_name)
+    node_name, metric_to_write, execution_mode = await NODE_SELECTION_POLICY.select_node(function_name)
 
     node_info = node_registry[node_name]
 
@@ -293,16 +290,6 @@ async def invoke_function(function_name: str):
             image_name = function_details["image"]
             docker_cmd = f"sudo docker run --rm {image_name} {command_to_run}"
             output = await _run_ssh_command_async(node_info, docker_cmd)
-
-        # Se era pre-warmed, ora è "usato".
-        if execution_mode == "Pre-warmed":
-            function_state_registry[function_name][node_name] = "cold"
-        if "Cold" in execution_mode:
-            remove_command = f"sudo docker rmi {image_name}"
-            await _run_ssh_command_async(node_info, remove_command)
-        function_details["invocations"] += 1
-
-        await WARMING_POLICY.apply(function_name)
 
         end_time = time.perf_counter()
         duration = end_time - start_time
