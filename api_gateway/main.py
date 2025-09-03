@@ -35,9 +35,6 @@ class RegisterNodeRequest(BaseModel):
     username: str
     password: str
 
-class InvokeFunctionRequest(BaseModel):
-    pass
-
 async def _run_ssh_command_async(node_info: Dict[str, Any], command: str) -> str:
     """
     Si connette a un nodo via SSH in modo asincrono ed esegue un comando.
@@ -273,7 +270,7 @@ def register_node(req: RegisterNodeRequest):
     }
 
 @app.post("/functions/invoke/{function_name}")
-async def invoke_function(function_name: str, req: InvokeFunctionRequest):
+async def invoke_function(function_name: str):
     start_time = time.perf_counter()
     if function_name not in function_registry:
         raise HTTPException(status_code=404, detail=f"Funzione '{function_name}' non trovata.")

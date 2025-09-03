@@ -64,9 +64,8 @@ def register_node(name: str, host: str, username: str, password: str, port: int 
 
 def invoke_function(function_name: str):
     url = f"{BASE_URL}/functions/invoke/{function_name}"
-    payload = {}
     try:
-        response = requests.post(url, json=payload)
+        response = requests.post(url)
         response.raise_for_status()
         response_data = response.json()
     except requests.exceptions.HTTPError as err:
