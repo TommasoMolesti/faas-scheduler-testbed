@@ -1,5 +1,6 @@
 # Python specific
 __pycache__/
+*/__pycache__/
 *.pyc
 *.pyo
 *.pyd
@@ -54,3 +55,6 @@ Desktop.ini     # Windows
 *~
 *.bak
 *.swp
+
+# Results
+results/*

@@ -18,6 +18,8 @@ app = FastAPI(
     description="Function as a Service Gateway API (Docker image execution via SSH)"
 )
 
+RESULTS_DIR = "/results"
+os.makedirs(RESULTS_DIR, exist_ok=True)
 function_registry: Dict[str, str] = {}
 node_registry: Dict[str, Dict[str, Any]] = {}
 function_state_registry: Dict[str, Dict[str, str]] = {}
@@ -33,6 +35,11 @@ class EXECUTION_MODES:
     COLD = Mode(value="cold", label="Cold")
     PRE_WARMED = Mode(value="pre-warmed", label="Pre-warmed")
     WARMED = Mode(value="warmed", label="Warmed")
+
+EXECUTION_MODE_MAP = {
+    mode.value: mode.label
+    for mode in [EXECUTION_MODES.COLD, EXECUTION_MODES.PRE_WARMED, EXECUTION_MODES.WARMED]
+}
 
 class RegisterFunctionRequest(BaseModel):
     name: str
@@ -165,7 +172,7 @@ class WarmedFirstPolicy:
         if function_name in function_state_registry:
             for n, state in function_state_registry[function_name].items():
                 if state == EXECUTION_MODES.WARMED.value:
-                    return n, None, EXECUTION_MODES.WARMED.label
+                    return n, None, EXECUTION_MODES.WARMED.value
 
         # Priorità 2: Fallback alla policy successiva nella catena
         return await PreWarmedFirstPolicy().select_node(function_name)
@@ -180,7 +187,7 @@ class PreWarmedFirstPolicy:
         if function_name in function_state_registry:
             for n, state in function_state_registry[function_name].items():
                 if state == EXECUTION_MODES.PRE_WARMED.value:
-                    return n, None, EXECUTION_MODES.PRE_WARMED.label
+                    return n, None, EXECUTION_MODES.PRE_WARMED.value
 
         # Priorità 2: Fallback alla policy successiva nella catena
         return await DefaultColdPolicy().select_node(function_name)
@@ -201,8 +208,6 @@ class DefaultColdPolicy:
 # DEFAULT_SCHEDULING_POLICY = RoundRobinPolicy()
 DEFAULT_SCHEDULING_POLICY = LeastUsedPolicy()
 
-# WARMING_TYPE = EXECUTION_MODES.COLD.value
-# WARMING_TYPE = EXECUTION_MODES.PRE_WARMED.value
 WARMING_TYPE = EXECUTION_MODES.WARMED.value
 
 SCHEDULING_POLICY = StaticWarmingPolicy()
@@ -228,7 +233,7 @@ async def _run_ssh_command_async(node_info: Dict[str, Any], command: str) -> str
     except Exception as e:
         raise Exception(f"Errore inatteso durante l'esecuzione SSH asincrona: {e}")
 
-def write_metrics_table(output_file="metrics_table.txt"):
+def write_metrics_table(output_file=f"{RESULTS_DIR}/metrics_table.txt"):
     if not metrics_log:
         return
 
@@ -252,7 +257,7 @@ def clean(filename):
 
 @app.post("/init")
 def init():
-    clean("metrics_table.txt")
+    clean("../results/metrics_table.txt")
 
 @app.post("/functions/register")
 async def register_function(req: RegisterFunctionRequest):
@@ -292,7 +297,7 @@ async def invoke_function(function_name: str):
 
     try:
         command_to_run = function_details["command"]
-        if execution_mode == EXECUTION_MODES.WARMED.label:
+        if execution_mode == EXECUTION_MODES.WARMED.value:
             container_name = f"warmed--{function_name}--{node_name}"
             docker_cmd = f"sudo docker exec {container_name} {command_to_run}"
             output = await _run_ssh_command_async(node_info, docker_cmd)
@@ -340,8 +345,6 @@ async def _warmup_function_on_node(function_name: str, node_name: str):
     container_name = f"warmed--{function_name}--{node_name}"
 
     try:
-        # Avvio il nuovo container usando "sleep infinity" per mantenerlo attivo
-
         docker_cmd = f"sudo docker run -d --name {container_name} {docker_image} sleep infinity"
         await _run_ssh_command_async(node_info, docker_cmd)
         
@@ -355,14 +358,14 @@ def write_metrics(metric_to_write, function_name, node_name, execution_mode, dur
     if not metric_to_write:
         metric_to_write = { "Function": function_name, "Node": node_name, "CPU Usage %": "---", "RAM Usage %": "---" }
 
-    metric_to_write["Execution Mode"] = execution_mode
+    metric_to_write["Execution Mode"] = EXECUTION_MODE_MAP.get(execution_mode, execution_mode)
     metric_to_write["Execution Time (s)"] = f"{duration:.4f}"
     metrics_log.append(metric_to_write)
     write_metrics_table()
     generate_boxplot_from_metrics()
     generate_barchart_from_metrics()
 
-def generate_boxplot_from_metrics(output_file="metrics_boxplot.png"):
+def generate_boxplot_from_metrics(output_file=f"{RESULTS_DIR}/metrics_boxplot.png"):
     """
     Genera un box plot delle performance di esecuzione e lo salva come immagine.
     """
@@ -399,7 +402,7 @@ def generate_boxplot_from_metrics(output_file="metrics_boxplot.png"):
     except Exception as e:
         print(f"Errore durante la generazione del box plot: {e}")
 
-def generate_barchart_from_metrics(output_file="metrics_barchart.png"):
+def generate_barchart_from_metrics(output_file=f"{RESULTS_DIR}/metrics_barchart.png"):
     """
     Genera un grafico a barre per confrontare i tempi di esecuzione medi.
     """

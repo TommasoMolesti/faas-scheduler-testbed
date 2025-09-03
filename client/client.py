@@ -84,7 +84,7 @@ if __name__ == "__main__":
     for service_name in SSH_NODE_SERVICE_NAMES:
         register_node(service_name, service_name, USER, PASSWORD, port=22)
     
-    func_name = f"fibonacci-func"
+    func_name = "fibonacci-func"
     register_function(func_name, DOCKER_IMAGE, COMMAND)
 
     for i in range(INVOCATIONS):
