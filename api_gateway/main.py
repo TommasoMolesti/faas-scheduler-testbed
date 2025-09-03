@@ -11,6 +11,7 @@ import asyncio
 import asyncssh
 import matplotlib.pyplot as plt
 import seaborn as sns
+from dataclasses import dataclass
 
 app = FastAPI(
     title="FaaS Gateway",
@@ -23,10 +24,20 @@ function_state_registry: Dict[str, Dict[str, str]] = {}
 metrics_log: List[Dict[str, Any]] = []
 first = True
 
+@dataclass(frozen=True)
+class Mode:
+    value: str
+    label: str
+
+class EXECUTION_MODES:
+    COLD = Mode(value="cold", label="Cold")
+    PRE_WARMED = Mode(value="pre-warmed", label="Pre-warmed")
+    WARMED = Mode(value="warmed", label="Warmed")
+
 class RegisterFunctionRequest(BaseModel):
-    name: str = Field(..., description="Il nome univoco della funzione da registrare.")
-    image: str = Field(..., description="Il nome dell'immagine Docker (es. 'python:3.11-slim').")
-    command: str = Field(..., description="Il comando da eseguire nel container (es. 'python main.py').")
+    name: str
+    image: str
+    command: str
 
 class RegisterNodeRequest(BaseModel):
     name: str
@@ -34,26 +45,6 @@ class RegisterNodeRequest(BaseModel):
     port: int = 22
     username: str
     password: str
-
-async def _run_ssh_command_async(node_info: Dict[str, Any], command: str) -> str:
-    """
-    Si connette a un nodo via SSH in modo asincrono ed esegue un comando.
-    """
-    try:
-        async with asyncssh.connect(
-            host=node_info["host"],
-            port=node_info["port"],
-            username=node_info["username"],
-            password=node_info["password"],
-            known_hosts=None
-        ) as conn:
-            result = await conn.run(command)
-            return result.stdout.strip()
-    except asyncssh.Error as e:
-        raise Exception(f"Errore SSH o del comando sul nodo '{node_info['host']}': {e}")
-    except Exception as e:
-        raise Exception(f"Errore inatteso durante l'esecuzione SSH asincrona: {e}")
-
 
 class RoundRobinPolicy():
     """
@@ -80,9 +71,9 @@ class RoundRobinPolicy():
             metric_entry = {
                 "Function": function_name,
                 "Node": selected_node,
-                "CPU Usage % ": "N/A",
+                "CPU Usage %": "N/A",
                 "RAM Usage %": "N/A",
-                "Execution Mode": "Round Robin - Cold"
+                "Execution Mode": f"Round Robin - {EXECUTION_MODES.COLD.label}"
             }
             return selected_node, metric_entry
         except StopIteration:
@@ -144,9 +135,9 @@ class LeastUsedPolicy():
             metric_entry = {
                 "Function": function_name,
                 "Node": selected_node,
-                "CPU Usage % ": node_metrics[selected_node]['cpu_usage'],
+                "CPU Usage %": node_metrics[selected_node]['cpu_usage'],
                 "RAM Usage %": node_metrics[selected_node]['ram_usage'],
-                "Execution Mode": "Least Used - Cold"
+                "Execution Mode": f"Least Used - {EXECUTION_MODES.COLD.label}"
             }
             return selected_node, metric_entry
         
@@ -157,10 +148,10 @@ class StaticWarmingPolicy:
     Sceglie se fare warming o pre-warming in base al valore passato alla funzione in modo statico
     """
     async def apply(self, warming_type: str, function_name):
-        if warming_type == "pre-warmed":
+        if warming_type == EXECUTION_MODES.PRE_WARMED.value:
             node_to_prepare, _ = await DEFAULT_SCHEDULING_POLICY.select_node(node_registry, function_name)
             await _prewarm_function_on_node(function_name, node_to_prepare)
-        elif warming_type == "warmed":
+        elif warming_type == EXECUTION_MODES.WARMED.value:
             node_to_prepare, _ = await DEFAULT_SCHEDULING_POLICY.select_node(node_registry, function_name)
             await _warmup_function_on_node(function_name, node_to_prepare)
 
@@ -173,8 +164,8 @@ class WarmedFirstPolicy:
         # Priorità 1: Cerca un'istanza 'warmed'
         if function_name in function_state_registry:
             for n, state in function_state_registry[function_name].items():
-                if state == "warmed":
-                    return n, None, "Warmed"
+                if state == EXECUTION_MODES.WARMED.value:
+                    return n, None, EXECUTION_MODES.WARMED.label
 
         # Priorità 2: Fallback alla policy successiva nella catena
         return await PreWarmedFirstPolicy().select_node(function_name)
@@ -188,8 +179,8 @@ class PreWarmedFirstPolicy:
         # Priorità 1: Cerca un'istanza 'pre-warmed'
         if function_name in function_state_registry:
             for n, state in function_state_registry[function_name].items():
-                if state == "pre-warmed":
-                    return n, None, "Pre-warmed"
+                if state == EXECUTION_MODES.PRE_WARMED.value:
+                    return n, None, EXECUTION_MODES.PRE_WARMED.label
 
         # Priorità 2: Fallback alla policy successiva nella catena
         return await DefaultColdPolicy().select_node(function_name)
@@ -210,13 +201,32 @@ class DefaultColdPolicy:
 # DEFAULT_SCHEDULING_POLICY = RoundRobinPolicy()
 DEFAULT_SCHEDULING_POLICY = LeastUsedPolicy()
 
-# WARMING_TYPE = "cold"
-# WARMING_TYPE = "pre-warmed"
-WARMING_TYPE = "warmed"
+# WARMING_TYPE = EXECUTION_MODES.COLD.value
+# WARMING_TYPE = EXECUTION_MODES.PRE_WARMED.value
+WARMING_TYPE = EXECUTION_MODES.WARMED.value
 
 SCHEDULING_POLICY = StaticWarmingPolicy()
 
 NODE_SELECTION_POLICY = WarmedFirstPolicy()
+
+async def _run_ssh_command_async(node_info: Dict[str, Any], command: str) -> str:
+    """
+    Si connette a un nodo via SSH in modo asincrono ed esegue un comando.
+    """
+    try:
+        async with asyncssh.connect(
+            host=node_info["host"],
+            port=node_info["port"],
+            username=node_info["username"],
+            password=node_info["password"],
+            known_hosts=None
+        ) as conn:
+            result = await conn.run(command)
+            return result.stdout.strip()
+    except asyncssh.Error as e:
+        raise Exception(f"Errore SSH o del comando sul nodo '{node_info['host']}': {e}")
+    except Exception as e:
+        raise Exception(f"Errore inatteso durante l'esecuzione SSH asincrona: {e}")
 
 def write_metrics_table(output_file="metrics_table.txt"):
     if not metrics_log:
@@ -282,7 +292,7 @@ async def invoke_function(function_name: str):
 
     try:
         command_to_run = function_details["command"]
-        if execution_mode == "Warmed":
+        if execution_mode == EXECUTION_MODES.WARMED.label:
             container_name = f"warmed--{function_name}--{node_name}"
             docker_cmd = f"sudo docker exec {container_name} {command_to_run}"
             output = await _run_ssh_command_async(node_info, docker_cmd)
@@ -315,7 +325,7 @@ async def _prewarm_function_on_node(function_name: str, node_name: str):
         
         if function_name not in function_state_registry:
             function_state_registry[function_name] = {}
-        function_state_registry[function_name][node_name] = "pre-warmed"
+        function_state_registry[function_name][node_name] = EXECUTION_MODES.PRE_WARMED.value
     except Exception as e:
         print(f"Errore durante il pre-warm di '{function_name}' su '{node_name}': {e}")
 
@@ -337,13 +347,13 @@ async def _warmup_function_on_node(function_name: str, node_name: str):
         
         if function_name not in function_state_registry:
             function_state_registry[function_name] = {}
-        function_state_registry[function_name][node_name] = "warmed"
+        function_state_registry[function_name][node_name] = EXECUTION_MODES.WARMED.value
     except Exception as e:
         print(f"Errore durante il warm-up di '{function_name}' su '{node_name}': {e}")
 
 def write_metrics(metric_to_write, function_name, node_name, execution_mode, duration):
     if not metric_to_write:
-        metric_to_write = { "Function": function_name, "Node": node_name, "CPU Usage % ": "---", "RAM Usage %": "---" }
+        metric_to_write = { "Function": function_name, "Node": node_name, "CPU Usage %": "---", "RAM Usage %": "---" }
 
     metric_to_write["Execution Mode"] = execution_mode
     metric_to_write["Execution Time (s)"] = f"{duration:.4f}"
@@ -372,7 +382,7 @@ def generate_boxplot_from_metrics(output_file="metrics_boxplot.png"):
             x='Category',
             y='Execution Time (s)',
             data=df,
-            order=['Cold', 'Pre-warmed', 'Warmed'],
+            order=[EXECUTION_MODES.COLD.label, EXECUTION_MODES.PRE_WARMED.label, EXECUTION_MODES.WARMED.label],
             palette='viridis',
             hue='Category',
             legend=False,
@@ -399,9 +409,9 @@ def generate_barchart_from_metrics(output_file="metrics_barchart.png"):
     try:
         df = pd.DataFrame(metrics_log)
         df['Execution Time (s)'] = pd.to_numeric(df['Execution Time (s)'])
-        df['Category'] = df['Execution Mode'].apply(lambda mode: 'Cold' if 'Cold' in mode else mode)
+        df['Category'] = df['Execution Mode'].apply(lambda mode: EXECUTION_MODES.COLD.label if EXECUTION_MODES.COLD.label in mode else mode)
 
-        mean_times = df.groupby('Category')['Execution Time (s)'].mean().reindex(['Cold', 'Pre-warmed', 'Warmed'])
+        mean_times = df.groupby('Category')['Execution Time (s)'].mean().reindex([EXECUTION_MODES.COLD.label, EXECUTION_MODES.PRE_WARMED.label, EXECUTION_MODES.WARMED.label])
 
         plt.style.use('seaborn-v0_8-whitegrid')
         fig, ax = plt.subplots(figsize=(10, 6))
