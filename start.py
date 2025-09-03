@@ -43,10 +43,6 @@ if __name__ == "__main__":
         print("\n---Rimuovo i container warmed---")
         run_command(f"docker rm {' '.join(container_ids)}")
 
-
-    print(f"\n---Rimuovo l'immagine '{IMAGE_TO_REMOVE}'---")
-    run_command(f"docker rmi {IMAGE_TO_REMOVE}")
-    
     print("\n✅ Pulizia dell'ambiente completata.")
     print("\nAvvio progetto...\n")
 

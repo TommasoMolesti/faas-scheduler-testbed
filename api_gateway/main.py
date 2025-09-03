@@ -345,7 +345,6 @@ async def _warmup_function_on_node(function_name: str, node_name: str):
     try:
         # Avvio il nuovo container usando "sleep infinity" per mantenerlo attivo
 
-        # TODO : c'è la probabilità che un container così esista già, da fare il controllo prima senza starne a creare uno nuovo ?
         docker_cmd = f"sudo docker run -d --name {container_name} {docker_image} sleep infinity"
         await _run_ssh_command_async(node_info, docker_cmd)
         
