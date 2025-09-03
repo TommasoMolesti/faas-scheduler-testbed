@@ -10,6 +10,6 @@ def fibonacci(n):
         return fibonacci(n - 1) + fibonacci(n - 2)
 
 if __name__ == "__main__":
-    n = 35
+    n = 40
     result = fibonacci(n)
     print(result)

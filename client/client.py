@@ -5,9 +5,9 @@ from typing import Optional, Any, List
 
 BASE_URL = "http://api_gateway:8000"
 
-DOCKER_IMAGE = "tommasomolesti/custom_python_heavy:v2"
+DOCKER_IMAGE = "tommasomolesti/custom_python_heavy:v5"
 COMMAND = "python loop_function.py"
-INVOCATIONS = 21
+INVOCATIONS = 10
 USER = "sshuser"
 PASSWORD = "sshpassword"
 SSH_NODE_SERVICE_NAMES = [

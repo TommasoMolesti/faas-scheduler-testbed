@@ -208,7 +208,7 @@ class DefaultColdPolicy:
 # DEFAULT_SCHEDULING_POLICY = RoundRobinPolicy()
 DEFAULT_SCHEDULING_POLICY = LeastUsedPolicy()
 
-WARMING_TYPE = EXECUTION_MODES.WARMED.value
+WARMING_TYPE = EXECUTION_MODES.COLD.value
 
 SCHEDULING_POLICY = StaticWarmingPolicy()
 
@@ -306,6 +306,7 @@ async def invoke_function(function_name: str):
             docker_cmd = f"sudo docker run --rm {image_name} {command_to_run}"
             output = await _run_ssh_command_async(node_info, docker_cmd)
 
+        print(f"Output execution : {output}")
         end_time = time.perf_counter()
         duration = end_time - start_time
 

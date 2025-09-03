@@ -1,7 +1,7 @@
 import subprocess
 import sys
 
-IMAGE_TO_REMOVE = "tommasomolesti/custom_python_heavy:v2" 
+IMAGE_TO_REMOVE = "tommasomolesti/custom_python_heavy:v5" 
 WARMED_CONTAINER_PREFIX = "warmed--"
 
 def run_command(command, stream_output=False):
