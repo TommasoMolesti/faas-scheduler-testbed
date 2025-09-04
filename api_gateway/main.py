@@ -12,6 +12,7 @@ import asyncssh
 import matplotlib.pyplot as plt
 import seaborn as sns
 from dataclasses import dataclass
+import uuid
 
 app = FastAPI(
     title="FaaS Gateway",
@@ -25,6 +26,7 @@ node_registry: Dict[str, Dict[str, Any]] = {}
 function_state_registry: Dict[str, Dict[str, str]] = {}
 metrics_log: List[Dict[str, Any]] = []
 first = True
+CONTAINER_PREFIX = "faas-scheduler--"
 
 @dataclass(frozen=True)
 class Mode:
@@ -296,12 +298,15 @@ async def invoke_function(function_name: str):
     try:
         command_to_run = function_details["command"]
         if execution_mode == EXECUTION_MODES.WARMED.value:
-            container_name = f"warmed--{function_name}--{node_name}"
+            container_name = f"{CONTAINER_PREFIX}{function_name}--{node_name}"
             docker_cmd = f"sudo docker exec {container_name} {command_to_run}"
             output = await _run_ssh_command_async(node_info, docker_cmd)
         else:
             image_name = function_details["image"]
-            docker_cmd = f"sudo docker run --rm {image_name} {command_to_run}"
+            unique_id = str(uuid.uuid4())[:8]
+            container_name = f"{CONTAINER_PREFIX}{function_name}--{unique_id}"
+
+            docker_cmd = f"sudo docker run --rm --name {container_name} {image_name} {command_to_run}"
             output = await _run_ssh_command_async(node_info, docker_cmd)
 
         print(f"Execution output : {output}")

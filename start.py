@@ -2,7 +2,7 @@ import subprocess
 import sys
 
 IMAGE_TO_REMOVE = "tommasomolesti/custom_python_heavy:v5" 
-WARMED_CONTAINER_PREFIX = "warmed--"
+CONTAINER_PREFIX = "faas-scheduler--"
 
 def run_command(command, stream_output=False):
     """
@@ -31,7 +31,7 @@ if __name__ == "__main__":
     run_command("docker-compose down")
 
     container_ids_str = subprocess.check_output(
-        f'docker ps -a --filter "name={WARMED_CONTAINER_PREFIX}" -q', 
+        f'docker ps -a --filter "name={CONTAINER_PREFIX}" -q', 
         shell=True, 
         text=True
     ).strip()
