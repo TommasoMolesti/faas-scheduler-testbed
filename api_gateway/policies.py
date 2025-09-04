@@ -16,13 +16,20 @@ class RoundRobinPolicy:
     async def select_node(self, nodes: Dict[str, Any], function_name: str) -> Optional[tuple]:
         if not nodes:
             return None, None
+        
         current_node_names = sorted(list(nodes.keys()))
         if current_node_names != self._nodes_cache:
             self._nodes_cache = current_node_names
             self.node_iterator = itertools.cycle(current_node_names)
+            
         try:
             selected_node = next(self.node_iterator)
-            metric_entry = {"Function": function_name, "Node": selected_node, "CPU Usage %": "N/A", "RAM Usage %": "N/A", "Execution Mode": f"Round Robin - {EXECUTION_MODES.COLD.label}"}
+            
+            metrics = await get_metrics_for_node(selected_node, nodes[selected_node])
+            cpu_usage = metrics.get('cpu_usage', 'N/A') if metrics else 'N/A'
+            ram_usage = metrics.get('ram_usage', 'N/A') if metrics else 'N/A'
+            metric_entry = {"Function": function_name, "Node": selected_node, "CPU Usage %": cpu_usage, "RAM Usage %": ram_usage, "Execution Mode": f"Round Robin - {EXECUTION_MODES.COLD.label}"}
+
             return selected_node, metric_entry
         except StopIteration:
             return None, None
