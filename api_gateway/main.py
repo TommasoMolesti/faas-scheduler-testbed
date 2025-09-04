@@ -25,8 +25,22 @@ function_registry: Dict[str, str] = {}
 node_registry: Dict[str, Dict[str, Any]] = {}
 function_state_registry: Dict[str, Dict[str, str]] = {}
 metrics_log: List[Dict[str, Any]] = []
-first = True
 CONTAINER_PREFIX = "faas-scheduler--"
+
+@app.on_event("startup")
+async def startup_event():
+    """
+    Eseguita automaticamente all'avvio del server.
+    """
+    
+    # Pulizia file metrics_table.txt  
+    path = f"{RESULTS_DIR}/metrics_table.txt" 
+    if os.path.exists(path):
+        try:
+            with open(path, 'w') as f:
+                f.truncate(0)
+        except Exception as e:
+            print(f"Errore durante la pulizia del file '{metrics_file_path}': {e}")
 
 @dataclass(frozen=True)
 class Mode:
@@ -208,7 +222,7 @@ class DefaultColdPolicy:
 # DEFAULT_SCHEDULING_POLICY = RoundRobinPolicy()
 DEFAULT_SCHEDULING_POLICY = LeastUsedPolicy()
 
-WARMING_TYPE = EXECUTION_MODES.WARMED.value
+WARMING_TYPE = EXECUTION_MODES.COLD.value
 
 SCHEDULING_POLICY = StaticWarmingPolicy()
 
@@ -246,25 +260,9 @@ def write_metrics_table(output_file=f"{RESULTS_DIR}/metrics_table.txt"):
     except Exception as e:
         print(f"Errore durante la scrittura della tabella delle metriche: {e}")
 
-def clean(filename):
-    file_path = os.path.join("/app", filename)
-    if os.path.exists(file_path):
-        try:
-            with open(file_path, 'w') as f:
-                f.truncate(0)
-        except Exception as e:
-            print(f"Errore durante la pulizia del file '{file_path}': {e}")
-
-@app.post("/init")
-def init():
-    clean("../results/metrics_table.txt")
 
 @app.post("/functions/register")
 async def register_function(req: RegisterFunctionRequest):
-    global first
-    if first:
-        init()
-        first = False
     if req.name in function_registry:
         raise HTTPException(status_code=400, detail=f"Funzione '{req.name}' già registrata.")
     function_registry[req.name] = {"image": req.image, "command": req.command}
