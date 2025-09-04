@@ -41,6 +41,19 @@ EXECUTION_MODE_MAP = {
     for mode in [EXECUTION_MODES.COLD, EXECUTION_MODES.PRE_WARMED, EXECUTION_MODES.WARMED]
 }
 
+async def _get_metrics_for_node(node_name: str, node_info: Dict[str, Any]) -> Optional[Dict[str, float]]:
+    """Recupera e parsifica le metriche di CPU e RAM per un singolo nodo."""
+    try:
+        metrics_json = await _run_ssh_command_async(node_info, "/usr/local/bin/get_node_metrics.sh")
+        metrics = json.loads(metrics_json)
+        return {
+            "cpu_usage": float(metrics.get("cpu_usage", float('inf'))),
+            "ram_usage": float(metrics.get("ram_usage", float('inf'))),
+        }
+    except Exception as e:
+        print(f"Attenzione: impossibile recuperare metriche per '{node_name}': {e}. Ignorato.")
+        return None
+
 class RegisterFunctionRequest(BaseModel):
     name: str
     image: str
@@ -91,34 +104,19 @@ class LeastUsedPolicy():
     Politica di selezione del nodo Least Used.
     Seleziona il nodo con il carico medio più basso.
     """
-
     async def _get_all_node_metrics(self, nodes: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         """
-        Si connette a tutti i nodi in parallelo e restituisce le loro metriche.
+        Si connette a tutti i nodi in parallelo e restituisce le loro metriche
+        usando la funzione di supporto _get_metrics_for_node.
         """
-        tasks = []
-        for node_name, node_info in nodes.items():
-            task = _run_ssh_command_async(node_info, "/usr/local/bin/get_node_metrics.sh")
-            tasks.append((node_name, task))
+        tasks = [
+            _get_metrics_for_node(name, info) for name, info in nodes.items()
+        ]
+        results = await asyncio.gather(*tasks)
 
-        results = await asyncio.gather(*(task for _, task in tasks), return_exceptions=True)
-        
-        live_metrics = {}
-        for (node_name, _), result in zip(tasks, results):
-            if isinstance(result, Exception):
-                print(f"  Errore nel recupero metriche per '{node_name}': {result}. Ignorato.")
-            else:
-                try:
-                    metrics = json.loads(result)
-                    live_metrics[node_name] = {
-                        "cpu_usage": float(metrics.get("cpu_usage", float('inf'))),
-                        "ram_usage": float(metrics.get("ram_usage", float('inf'))),
-                    }
-                except (json.JSONDecodeError, TypeError):
-                    print(f"Errore nel parsing del JSON da '{node_name}'.")
-        
+        live_metrics = {name: metrics for name, metrics in zip(nodes.keys(), results) if metrics}
+
         return live_metrics
-
     async def select_node(self, nodes: Dict[str, Dict[str, Any]], function_name: str) -> Optional[str]:
         if not nodes:
             return None, None
@@ -306,11 +304,11 @@ async def invoke_function(function_name: str):
             docker_cmd = f"sudo docker run --rm {image_name} {command_to_run}"
             output = await _run_ssh_command_async(node_info, docker_cmd)
 
-        print(f"Output execution : {output}")
+        print(f"Execution output : {output}")
         end_time = time.perf_counter()
         duration = end_time - start_time
 
-        write_metrics(metric_to_write, function_name, node_name, execution_mode, duration)
+        await write_metrics(metric_to_write, function_name, node_name, execution_mode, duration)
 
     except Exception as e:
         end_time = time.perf_counter()
@@ -355,9 +353,18 @@ async def _warmup_function_on_node(function_name: str, node_name: str):
     except Exception as e:
         print(f"Errore durante il warm-up di '{function_name}' su '{node_name}': {e}")
 
-def write_metrics(metric_to_write, function_name, node_name, execution_mode, duration):
+async def write_metrics(metric_to_write, function_name, node_name, execution_mode, duration):
     if not metric_to_write:
-        metric_to_write = { "Function": function_name, "Node": node_name, "CPU Usage %": "---", "RAM Usage %": "---" }
+        metrics = await _get_metrics_for_node(node_name, node_info)
+        if metrics:
+            metric_to_write = {
+                "Function": function_name,
+                "Node": node_name,
+                "CPU Usage %": metrics.get("cpu_usage"),
+                "RAM Usage %": metrics.get("ram_usage"),
+            }
+        else:
+            metric_to_write = { "Function": function_name, "Node": node_name, "CPU Usage %": "---", "RAM Usage %": "---" }
 
     metric_to_write["Execution Mode"] = EXECUTION_MODE_MAP.get(execution_mode, execution_mode)
     metric_to_write["Execution Time (s)"] = f"{duration:.4f}"
