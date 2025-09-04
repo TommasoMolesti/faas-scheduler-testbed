@@ -346,7 +346,7 @@ async def _warmup_function_on_node(function_name: str, node_name: str):
 
     node_info = node_registry[node_name]
     docker_image = function_registry[function_name]["image"]
-    container_name = f"warmed--{function_name}--{node_name}"
+    container_name = f"{CONTAINER_PREFIX}{function_name}--{node_name}"
 
     try:
         docker_cmd = f"sudo docker run -d --name {container_name} {docker_image} sleep infinity"
