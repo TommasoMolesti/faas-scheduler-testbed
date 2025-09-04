@@ -208,7 +208,7 @@ class DefaultColdPolicy:
 # DEFAULT_SCHEDULING_POLICY = RoundRobinPolicy()
 DEFAULT_SCHEDULING_POLICY = LeastUsedPolicy()
 
-WARMING_TYPE = EXECUTION_MODES.COLD.value
+WARMING_TYPE = EXECUTION_MODES.WARMED.value
 
 SCHEDULING_POLICY = StaticWarmingPolicy()
 
@@ -360,6 +360,7 @@ async def _warmup_function_on_node(function_name: str, node_name: str):
 
 async def write_metrics(metric_to_write, function_name, node_name, execution_mode, duration):
     if not metric_to_write:
+        node_info = node_registry[node_name]
         metrics = await _get_metrics_for_node(node_name, node_info)
         if metrics:
             metric_to_write = {
