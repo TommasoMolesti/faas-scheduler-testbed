@@ -368,16 +368,18 @@ def write_metrics(metric_to_write, function_name, node_name, execution_mode, dur
 
 def generate_boxplot_from_metrics(output_file=f"{RESULTS_DIR}/metrics_boxplot.png"):
     """
-    Genera un box plot delle performance di esecuzione e lo salva come immagine.
+    Genera un box plot dinamico basato sulle modalità di esecuzione presenti.
     """
     if not metrics_log:
         return
 
     try:
         df = pd.DataFrame(metrics_log)
-
         df['Execution Time (s)'] = pd.to_numeric(df['Execution Time (s)'])
         df['Category'] = df['Execution Mode'].apply(lambda mode: 'Cold' if 'Cold' in mode else mode)
+
+        master_order = [EXECUTION_MODES.COLD.label, EXECUTION_MODES.PRE_WARMED.label, EXECUTION_MODES.WARMED.label]
+        present_categories = [cat for cat in master_order if cat in df['Category'].unique()]
 
         plt.style.use('seaborn-v0_8-whitegrid')
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -386,7 +388,7 @@ def generate_boxplot_from_metrics(output_file=f"{RESULTS_DIR}/metrics_boxplot.pn
             x='Category',
             y='Execution Time (s)',
             data=df,
-            order=[EXECUTION_MODES.COLD.label, EXECUTION_MODES.PRE_WARMED.label, EXECUTION_MODES.WARMED.label],
+            order=present_categories,
             palette='viridis',
             hue='Category',
             legend=False,
@@ -405,7 +407,7 @@ def generate_boxplot_from_metrics(output_file=f"{RESULTS_DIR}/metrics_boxplot.pn
 
 def generate_barchart_from_metrics(output_file=f"{RESULTS_DIR}/metrics_barchart.png"):
     """
-    Genera un grafico a barre per confrontare i tempi di esecuzione medi.
+    Genera un grafico a barre dinamico basato sulle modalità di esecuzione presenti.
     """
     if not metrics_log:
         return
@@ -415,7 +417,10 @@ def generate_barchart_from_metrics(output_file=f"{RESULTS_DIR}/metrics_barchart.
         df['Execution Time (s)'] = pd.to_numeric(df['Execution Time (s)'])
         df['Category'] = df['Execution Mode'].apply(lambda mode: EXECUTION_MODES.COLD.label if EXECUTION_MODES.COLD.label in mode else mode)
 
-        mean_times = df.groupby('Category')['Execution Time (s)'].mean().reindex([EXECUTION_MODES.COLD.label, EXECUTION_MODES.PRE_WARMED.label, EXECUTION_MODES.WARMED.label])
+        mean_times = df.groupby('Category')['Execution Time (s)'].mean()
+        master_order = [EXECUTION_MODES.COLD.label, EXECUTION_MODES.PRE_WARMED.label, EXECUTION_MODES.WARMED.label]
+        present_categories = [cat for cat in master_order if cat in mean_times.index]
+        mean_times = mean_times.reindex(present_categories)
 
         plt.style.use('seaborn-v0_8-whitegrid')
         fig, ax = plt.subplots(figsize=(10, 6))
