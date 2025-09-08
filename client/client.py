@@ -7,7 +7,7 @@ BASE_URL = "http://api_gateway:8000"
 
 DOCKER_IMAGE = "tommasomolesti/custom_python_heavy:v5"
 COMMAND = "python loop_function.py"
-INVOCATIONS = 10
+INVOCATIONS = 100
 USER = "sshuser"
 PASSWORD = "sshpassword"
 SSH_NODE_SERVICE_NAMES = [
