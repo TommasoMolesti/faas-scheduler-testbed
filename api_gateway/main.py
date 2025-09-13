@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 import time
 import uuid
 import os
+import pandas as pd
 
 import state
 import models
@@ -15,7 +16,7 @@ app = FastAPI(
 )
 
 DEFAULT_SCHEDULING_POLICY = policies.LeastUsedPolicy()
-WARMING_TYPE = models.EXECUTION_MODES.WARMED.value
+WARMING_TYPE = models.EXECUTION_MODES.PRE_WARMED.value
 SCHEDULING_POLICY = policies.StaticWarmingPolicy()
 NODE_SELECTION_POLICY = policies.WarmedFirstPolicy()
 

@@ -1,7 +1,5 @@
 import pandas as pd
 from tabulate import tabulate
-import matplotlib.pyplot as plt
-import seaborn as sns
 import os
 
 import state

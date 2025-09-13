@@ -3,19 +3,22 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 
-from api_gateway import models
-from api_gateway import state
+RESULTS_DIR = "/results"
+INPUT_CSV_PATH = os.path.join(RESULTS_DIR, "metrics.csv")
 
-INPUT_CSV_PATH = os.path.join(state.RESULTS_DIR, "metrics.csv")
+class EXECUTION_MODES:
+    COLD = "Cold"
+    PRE_WARMED = "Pre-warmed"
+    WARMED = "Warmed"
 
 def generate_boxplot(df):
     """Genera un box plot dal DataFrame di metriche."""
-    output_file = os.path.join(state.RESULTS_DIR, "metrics_boxplot.png")
+    output_file = os.path.join(RESULTS_DIR, "metrics_boxplot.png")
     try:
         df['Execution Time (s)'] = pd.to_numeric(df['Execution Time (s)'])
         df['Category'] = df['Execution Mode'].apply(lambda mode: 'Cold' if 'Cold' in mode else mode)
 
-        master_order = [models.EXECUTION_MODES.COLD, models.EXECUTION_MODES.PRE_WARMED, models.EXECUTION_MODES.WARMED]
+        master_order = [EXECUTION_MODES.COLD, EXECUTION_MODES.PRE_WARMED, EXECUTION_MODES.WARMED]
         present_categories = [cat for cat in master_order if cat in df['Category'].unique()]
 
         plt.style.use('seaborn-v0_8-whitegrid')
@@ -32,13 +35,13 @@ def generate_boxplot(df):
 
 def generate_barchart(df):
     """Genera un grafico a barre dal DataFrame di metriche."""
-    output_file = os.path.join(state.RESULTS_DIR, "metrics_barchart.png")
+    output_file = os.path.join(RESULTS_DIR, "metrics_barchart.png")
     try:
         df['Execution Time (s)'] = pd.to_numeric(df['Execution Time (s)'])
-        df['Category'] = df['Execution Mode'].apply(lambda mode: models.EXECUTION_MODES.COLD if models.EXECUTION_MODES.COLD in mode else mode)
+        df['Category'] = df['Execution Mode'].apply(lambda mode: EXECUTION_MODES.COLD if EXECUTION_MODES.COLD in mode else mode)
         
         mean_times = df.groupby('Category')['Execution Time (s)'].mean()
-        master_order = [models.EXECUTION_MODES.COLD, models.EXECUTION_MODES.PRE_WARMED, models.EXECUTION_MODES.WARMED]
+        master_order = [EXECUTION_MODES.COLD, EXECUTION_MODES.PRE_WARMED, EXECUTION_MODES.WARMED]
         present_categories = [cat for cat in master_order if cat in mean_times.index]
         mean_times = mean_times.reindex(present_categories)
         
