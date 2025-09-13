@@ -15,8 +15,14 @@ app = FastAPI(
     description="Function as a Service Gateway API"
 )
 
-DEFAULT_SCHEDULING_POLICY = policies.LeastUsedPolicy()
-WARMING_TYPE = models.EXECUTION_MODES.PRE_WARMED.value
+DEFAULT_SCHEDULING_POLICY = policies.RoundRobinPolicy()
+# DEFAULT_SCHEDULING_POLICY = policies.LeastUsedPolicy()
+# DEFAULT_SCHEDULING_POLICY = policies.MostUsedPolicy()
+
+WARMING_TYPE = models.EXECUTION_MODES.COLD.value
+# WARMING_TYPE = models.EXECUTION_MODES.PRE_WARMED.value
+# WARMING_TYPE = models.EXECUTION_MODES.WARMED.value
+
 SCHEDULING_POLICY = policies.StaticWarmingPolicy()
 NODE_SELECTION_POLICY = policies.WarmedFirstPolicy()
 
