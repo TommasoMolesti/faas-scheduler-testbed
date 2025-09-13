@@ -48,7 +48,7 @@ class LeastUsedPolicy:
             print("Least Used: Impossibile recuperare le metriche da alcun nodo.")
             return None, None
         
-        selected_node = min(node_metrics, key=lambda n: (node_metrics[n]["cpu_usage"] + node_metrics[n]["ram_usage"]) / 2)
+        selected_node = min(node_metrics, key=lambda n: node_metrics[n]["cpu_usage"])
         
         if selected_node:
             metric_entry = {"Function": function_name, "Node": selected_node, "CPU Usage %": node_metrics[selected_node]['cpu_usage'], "RAM Usage %": node_metrics[selected_node]['ram_usage'], "Execution Mode": f"Least Used - {EXECUTION_MODES.COLD.label}"}
