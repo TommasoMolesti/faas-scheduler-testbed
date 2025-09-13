@@ -61,17 +61,24 @@ async def invoke_function(function_name: str):
         node_name, metric_to_write, execution_mode = await NODE_SELECTION_POLICY.select_node(function_name, DEFAULT_SCHEDULING_POLICY)
         node_info = state.node_registry[node_name]
         command_to_run = function_details["command"]
+        image_name = function_details["image"]
 
         if execution_mode == models.EXECUTION_MODES.WARMED.value:
             container_name = f"{state.CONTAINER_PREFIX}{function_name}--{node_name}"
             docker_cmd = f"sudo docker exec {container_name} {command_to_run}"
         else:
-            image_name = function_details["image"]
             unique_id = str(uuid.uuid4())[:8]
             container_name = f"{state.CONTAINER_PREFIX}{function_name}--{unique_id}"
             docker_cmd = f"sudo docker run --rm --name {container_name} {image_name} {command_to_run}"
         
         output = await node_manager.run_ssh_command(node_info, docker_cmd)
+
+        if execution_mode == models.EXECUTION_MODES.COLD.value:
+            try:
+                cleanup_cmd = f"sudo docker rmi {image_name}"
+                await node_manager.run_ssh_command(node_info, cleanup_cmd)
+            except Exception as e:
+                print(f"Impossibile rimuovere l'immagine dal nodo '{node_name} : {e}")
 
     except Exception as e:
         end_time = time.perf_counter()

@@ -1,26 +1,12 @@
 import requests
 import json
 import time
+import constants
 from typing import Optional, Any, List
-
-BASE_URL = "http://api_gateway:8000"
-
-DOCKER_IMAGE_HEAVY = "tommasomolesti/custom_python_heavy:v6"
-DOCKER_IMAGE_LIGHT = "tommasomolesti/custom_python_light:v1"
-COMMAND = "python loop_function.py"
-INVOCATIONS = 5
-USER = "sshuser"
-PASSWORD = "sshpassword"
-SSH_NODE_SERVICE_NAMES = [
-    "ssh_node_1",
-    "ssh_node_2",
-    "ssh_node_3",
-    "ssh_node_4"
-]
 
 def register_function(name: str, image: str, command: str):
     """Registra una funzione sul gateway."""
-    url = f"{BASE_URL}/functions/register"
+    url = f"{constants.BASE_URL}/functions/register"
     payload = {"name": name, "image": image, "command": command}
     try:
         response = requests.post(url, json=payload)
@@ -34,12 +20,12 @@ def register_function(name: str, image: str, command: str):
         except json.JSONDecodeError:
             print(f"Dettagli: {err.response.text}")
     except requests.exceptions.ConnectionError as err:
-        print(f"Errore di connessione: Assicurati che il server FastAPI sia in esecuzione su {BASE_URL}. Dettagli: {err}")
+        print(f"Errore di connessione: Assicurati che il server FastAPI sia in esecuzione su {constants.BASE_URL}. Dettagli: {err}")
     except Exception as err:
         print(f"Si è verificato un errore inatteso: {err}")
 
 def register_node(name: str, host: str, username: str, password: str, port: int = 22):
-    url = f"{BASE_URL}/nodes/register"
+    url = f"{constants.BASE_URL}/nodes/register"
     payload = {
         "name": name,
         "host": host,
@@ -59,12 +45,12 @@ def register_node(name: str, host: str, username: str, password: str, port: int 
         except json.JSONDecodeError:
             print(f"Dettagli: {err.response.text}")
     except requests.exceptions.ConnectionError as err:
-        print(f"Errore di connessione: Assicurati che il server FastAPI sia in esecuzione su {BASE_URL}. Dettagli: {err}")
+        print(f"Errore di connessione: Assicurati che il server FastAPI sia in esecuzione su {constants.BASE_URL}. Dettagli: {err}")
     except Exception as err:
         print(f"Si è verificato un errore inatteso: {err}")
 
 def invoke_function(function_name: str):
-    url = f"{BASE_URL}/functions/invoke/{function_name}"
+    url = f"{constants.BASE_URL}/functions/invoke/{function_name}"
     try:
         response = requests.post(url)
         response.raise_for_status()
@@ -77,21 +63,21 @@ def invoke_function(function_name: str):
         except json.JSONDecodeError:
             print(f"Dettagli: {err.response.text}")
     except requests.exceptions.ConnectionError as err:
-        print(f"Errore di connessione: Assicurati che il server FastAPI sia in esecuzione su {BASE_URL}. Dettagli: {err}")
+        print(f"Errore di connessione: Assicurati che il server FastAPI sia in esecuzione su {constants.BASE_URL}. Dettagli: {err}")
     except Exception as err:
         print(f"Si è verificato un errore inatteso durante l'invocazione: {err}")
 
 if __name__ == "__main__":
-    for service_name in SSH_NODE_SERVICE_NAMES:
-        register_node(service_name, service_name, USER, PASSWORD, port=22)
+    for service_name in constants.SSH_NODE_SERVICE_NAMES:
+        register_node(service_name, service_name, constants.USER, constants.PASSWORD, port=22)
     
     func_name_small = "fibonacci-image-big-func-small"
-    register_function(func_name_small, DOCKER_IMAGE_HEAVY, COMMAND)
+    register_function(func_name_small, constants.DOCKER_IMAGE_HEAVY, constants.COMMAND)
 
     func_name_big = "fibonacci-image-small-func-big"
-    register_function(func_name_big, DOCKER_IMAGE_LIGHT, COMMAND)
+    register_function(func_name_big, constants.DOCKER_IMAGE_LIGHT, constants.COMMAND)
 
-    for i in range(INVOCATIONS):
+    for i in range(constants.INVOCATIONS):
         invoke_function(func_name_small)
         time.sleep(1)
         invoke_function(func_name_big)

@@ -2,6 +2,7 @@ import subprocess
 import sys
 
 from api_gateway import state
+from client import constants
 
 def run_command(command, stream_output=False):
     """
@@ -41,6 +42,9 @@ if __name__ == "__main__":
         run_command(f"docker stop {' '.join(container_ids)}")
         print("\n---Rimuovo i container warmed---")
         run_command(f"docker rm {' '.join(container_ids)}")
+
+    run_command(f"docker rmi {constants.DOCKER_IMAGE_HEAVY}")
+    run_command(f"docker rmi {constants.DOCKER_IMAGE_LIGHT}")
 
     print("\n✅ Pulizia dell'ambiente completata.")
     print("\nAvvio progetto...\n")
