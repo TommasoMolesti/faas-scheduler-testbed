@@ -73,6 +73,37 @@ class LeastUsedPolicy:
             return selected_node, metric_entry
         return None, None
 
+class MostUsedPolicy:
+    async def _get_all_node_metrics(self, nodes: Dict[str, Any]) -> Dict[str, Any]:
+        tasks = [get_metrics_for_node(name, info) for name, info in nodes.items()]
+        results = await asyncio.gather(*tasks)
+        return {name: metrics for name, metrics in zip(nodes.keys(), results) if metrics}
+
+    async def select_node(self, nodes: Dict[str, Any], function_name: str) -> Optional[tuple]:
+        if not nodes:
+            return None, None
+        
+        all_node_metrics = await self._get_all_node_metrics(nodes)
+        if not all_node_metrics:
+            print("Most Used: Impossibile recuperare le metriche da alcun nodo.")
+            return None, None
+        
+        eligible_nodes = {
+            name: metrics for name, metrics in all_node_metrics.items()
+            if metrics.get('ram_usage', 100.0) < state.RAM_THRESHOLD
+        }
+
+        if not eligible_nodes:
+            print(f"Attenzione (Most Used): Nessun nodo disponibile con RAM < {state.RAM_THRESHOLD}%.")
+            return None, None
+
+        selected_node = max(eligible_nodes, key=lambda n: eligible_nodes[n]["cpu_usage"])
+        
+        if selected_node:
+            metric_entry = {"Function": function_name, "Node": selected_node, "CPU Usage %": eligible_nodes[selected_node]['cpu_usage'], "RAM Usage %": eligible_nodes[selected_node]['ram_usage'], "Execution Mode": f"Most Used - {EXECUTION_MODES.COLD.label}"}
+            return selected_node, metric_entry
+        return None, None
+
 class StaticWarmingPolicy:
     async def apply(self, warming_type: str, function_name: str, scheduler):
         if warming_type == EXECUTION_MODES.PRE_WARMED.value:
