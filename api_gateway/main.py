@@ -14,20 +14,27 @@ app = FastAPI(
     description="Function as a Service Gateway API"
 )
 
-DEFAULT_SCHEDULING_POLICY = policies.MostUsedPolicy()
-WARMING_TYPE = models.EXECUTION_MODES.COLD.value
+DEFAULT_SCHEDULING_POLICY = policies.LeastUsedPolicy()
+WARMING_TYPE = models.EXECUTION_MODES.WARMED.value
 SCHEDULING_POLICY = policies.StaticWarmingPolicy()
 NODE_SELECTION_POLICY = policies.WarmedFirstPolicy()
 
 @app.on_event("startup")
 async def startup_event():
+    """
+    All'avvio del server, controlla se esiste un file di metriche precedente,
+    se si carica i dati nella sessione corrente.
+    """
+    csv_path = os.path.join(state.RESULTS_DIR, "metrics.csv")
+    
     os.makedirs(state.RESULTS_DIR, exist_ok=True)
-    metrics_file_path = os.path.join(state.RESULTS_DIR, "metrics_table.txt")
-    if os.path.exists(metrics_file_path):
+
+    if os.path.exists(csv_path):
         try:
-            with open(metrics_file_path, 'w') as f: f.truncate(0)
+            df_existing = pd.read_csv(csv_path)
+            state.metrics_log.extend(df_existing.to_dict('records'))
         except Exception as e:
-            print(f"Errore durante la pulizia del file '{metrics_file_path}': {e}")
+            print(f"Attenzione: impossibile leggere il file di metriche esistente. Errore: {e}")
 
 @app.post("/functions/register")
 async def register_function(req: models.RegisterFunctionRequest):

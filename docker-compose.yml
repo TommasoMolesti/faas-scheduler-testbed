@@ -93,3 +93,10 @@ services:
       api_gateway:
         condition: service_healthy
     restart: "no"
+
+  plot_generator:
+    build:
+      context: ./plot_generator
+      dockerfile: Dockerfile
+    volumes:
+      - ./results:/results
