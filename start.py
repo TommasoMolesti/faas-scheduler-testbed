@@ -1,34 +1,13 @@
 import subprocess
-import sys
 
 from api_gateway import state
 from client import constants
-
-def run_command(command, stream_output=False):
-    """
-    Esegue un comando di shell. Se stream_output è True, l'output viene
-    mostrato in tempo reale. Altrimenti, viene catturato e mostrato alla fine.
-    """
-    try:
-        if stream_output:
-            subprocess.run(command, shell=True, check=True)
-        else:
-            process = subprocess.run(
-                command, 
-                shell=True, 
-                check=True, 
-                capture_output=True, 
-                text=True
-            )
-        
-    except subprocess.CalledProcessError as e:
-        print(f"Errore durante l'esecuzione del comando.")
-
+import utils
 
 if __name__ == "__main__":
     print("\nInizio la pulizia dell'ambiente Docker...")
     print("\n---Fermo i servizi di docker---")
-    run_command("docker-compose down")
+    utils.run_command("docker-compose down")
 
     container_ids_str = subprocess.check_output(
         f'docker ps -a --filter "name={state.CONTAINER_PREFIX}" -q', 
@@ -39,16 +18,16 @@ if __name__ == "__main__":
     if container_ids_str:
         container_ids = container_ids_str.split('\n')
         print("\n---Fermo i container warmed---")
-        run_command(f"docker stop {' '.join(container_ids)}")
+        utils.run_command(f"docker stop {' '.join(container_ids)}")
         print("\n---Rimuovo i container warmed---")
-        run_command(f"docker rm {' '.join(container_ids)}")
+        utils.run_command(f"docker rm {' '.join(container_ids)}")
 
-    run_command(f"docker rmi {constants.DOCKER_IMAGE_HEAVY}")
-    run_command(f"docker rmi {constants.DOCKER_IMAGE_LIGHT}")
+    utils.run_command(f"docker rmi {constants.DOCKER_IMAGE_HEAVY}")
+    utils.run_command(f"docker rmi {constants.DOCKER_IMAGE_LIGHT}")
 
     print("\n✅ Pulizia dell'ambiente completata.")
     print("\nAvvio progetto...\n")
 
-    run_command("docker-compose up --build", stream_output=True)
+    utils.run_command("docker-compose up --build", stream_output=True)
 
     print("\n\n✅ Test completato.")
