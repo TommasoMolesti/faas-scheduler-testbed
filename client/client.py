@@ -5,9 +5,10 @@ from typing import Optional, Any, List
 
 BASE_URL = "http://api_gateway:8000"
 
-DOCKER_IMAGE = "tommasomolesti/custom_python_heavy:v5"
+DOCKER_IMAGE_HEAVY = "tommasomolesti/custom_python_heavy:v6"
+DOCKER_IMAGE_LIGHT = "tommasomolesti/custom_python_light:v1"
 COMMAND = "python loop_function.py"
-INVOCATIONS = 100
+INVOCATIONS = 5
 USER = "sshuser"
 PASSWORD = "sshpassword"
 SSH_NODE_SERVICE_NAMES = [
@@ -84,9 +85,14 @@ if __name__ == "__main__":
     for service_name in SSH_NODE_SERVICE_NAMES:
         register_node(service_name, service_name, USER, PASSWORD, port=22)
     
-    func_name = "fibonacci-func"
-    register_function(func_name, DOCKER_IMAGE, COMMAND)
+    func_name_small = "fibonacci-image-big-func-small"
+    register_function(func_name_small, DOCKER_IMAGE_HEAVY, COMMAND)
+
+    func_name_big = "fibonacci-image-small-func-big"
+    register_function(func_name_big, DOCKER_IMAGE_LIGHT, COMMAND)
 
     for i in range(INVOCATIONS):
-        invoke_function(func_name)
+        invoke_function(func_name_small)
+        time.sleep(1)
+        invoke_function(func_name_big)
         time.sleep(1)

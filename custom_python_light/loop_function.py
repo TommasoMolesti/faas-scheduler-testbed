@@ -21,6 +21,6 @@ def fibonacci_nums(n):
     return sequence
  
 if __name__ == "__main__":
-    n = 40000
+    n = 70000
     result = handler({"n": n}, {})
     print(result)

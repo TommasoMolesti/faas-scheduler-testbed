@@ -72,7 +72,6 @@ async def invoke_function(function_name: str):
             docker_cmd = f"sudo docker run --rm --name {container_name} {image_name} {command_to_run}"
         
         output = await node_manager.run_ssh_command(node_info, docker_cmd)
-        print(f"Execution output : {output}")
 
     except Exception as e:
         end_time = time.perf_counter()
