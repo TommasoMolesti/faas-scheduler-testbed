@@ -1,7 +1,7 @@
 import subprocess
 import sys
 
-import state
+from api_gateway import state
 
 def run_command(command, stream_output=False):
     """
