@@ -73,7 +73,7 @@ async def invoke_function(function_name: str):
         
         output = await node_manager.run_ssh_command(node_info, docker_cmd)
 
-        if execution_mode == models.EXECUTION_MODES.COLD.value:
+        if models.EXECUTION_MODES.COLD.label in execution_mode:
             try:
                 cleanup_cmd = f"sudo docker rmi {image_name}"
                 await node_manager.run_ssh_command(node_info, cleanup_cmd)
