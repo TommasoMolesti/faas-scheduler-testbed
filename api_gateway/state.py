@@ -7,3 +7,5 @@ metrics_log: List[Dict[str, Any]] = []
 
 CONTAINER_PREFIX = "faas-scheduler--"
 RESULTS_DIR = "/results"
+
+RAM_THRESHOLD = 85.0

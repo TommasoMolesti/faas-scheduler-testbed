@@ -21,18 +21,26 @@ class RoundRobinPolicy:
         if current_node_names != self._nodes_cache:
             self._nodes_cache = current_node_names
             self.node_iterator = itertools.cycle(current_node_names)
-            
-        try:
-            selected_node = next(self.node_iterator)
-            
-            metrics = await get_metrics_for_node(selected_node, nodes[selected_node])
-            cpu_usage = metrics.get('cpu_usage', 'N/A') if metrics else 'N/A'
-            ram_usage = metrics.get('ram_usage', 'N/A') if metrics else 'N/A'
-            metric_entry = {"Function": function_name, "Node": selected_node, "CPU Usage %": cpu_usage, "RAM Usage %": ram_usage, "Execution Mode": f"Round Robin - {EXECUTION_MODES.COLD.label}"}
+        
+        nodes_to_check = len(current_node_names)
+        for _ in range(nodes_to_check):
+            try:
+                selected_node = next(self.node_iterator)
+                metrics = await get_metrics_for_node(selected_node, nodes[selected_node])
 
-            return selected_node, metric_entry
-        except StopIteration:
-            return None, None
+                if metrics and metrics.get('ram_usage', 100.0) < state.RAM_THRESHOLD:
+                    cpu_usage = metrics.get('cpu_usage', 'N/A')
+                    ram_usage = metrics.get('ram_usage', 'N/A')
+                    metric_entry = {"Function": function_name, "Node": selected_node, "CPU Usage %": cpu_usage, "RAM Usage %": ram_usage, "Execution Mode": f"Round Robin - {EXECUTION_MODES.COLD.label}"}
+                    return selected_node, metric_entry
+                else:
+                    print(f"Attenzione (Round Robin): Nodo '{selected_node}' scartato per RAM > {state.RAM_THRESHOLD}%.")
+
+            except StopIteration:
+                return None, None
+        
+        print("Attenzione (Round Robin): Nessun nodo disponibile con RAM sufficiente.")
+        return None, None
 
 class LeastUsedPolicy:
     async def _get_all_node_metrics(self, nodes: Dict[str, Any]) -> Dict[str, Any]:
@@ -43,15 +51,25 @@ class LeastUsedPolicy:
     async def select_node(self, nodes: Dict[str, Any], function_name: str) -> Optional[tuple]:
         if not nodes:
             return None, None
-        node_metrics = await self._get_all_node_metrics(nodes)
-        if not node_metrics:
+        
+        all_node_metrics = await self._get_all_node_metrics(nodes)
+        if not all_node_metrics:
             print("Least Used: Impossibile recuperare le metriche da alcun nodo.")
             return None, None
         
-        selected_node = min(node_metrics, key=lambda n: node_metrics[n]["cpu_usage"])
+        eligible_nodes = {
+            name: metrics for name, metrics in all_node_metrics.items()
+            if metrics.get('ram_usage', 100.0) < state.RAM_THRESHOLD
+        }
+
+        if not eligible_nodes:
+            print(f"Attenzione (Least Used): Nessun nodo disponibile con RAM < {state.RAM_THRESHOLD}%.")
+            return None, None
+
+        selected_node = min(eligible_nodes, key=lambda n: eligible_nodes[n]["cpu_usage"])
         
         if selected_node:
-            metric_entry = {"Function": function_name, "Node": selected_node, "CPU Usage %": node_metrics[selected_node]['cpu_usage'], "RAM Usage %": node_metrics[selected_node]['ram_usage'], "Execution Mode": f"Least Used - {EXECUTION_MODES.COLD.label}"}
+            metric_entry = {"Function": function_name, "Node": selected_node, "CPU Usage %": eligible_nodes[selected_node]['cpu_usage'], "RAM Usage %": eligible_nodes[selected_node]['ram_usage'], "Execution Mode": f"Least Used - {EXECUTION_MODES.COLD.label}"}
             return selected_node, metric_entry
         return None, None
 
@@ -84,6 +102,6 @@ class DefaultColdPolicy:
     async def select_node(self, function_name: str, scheduler):
         node_name, metric_to_write = await scheduler.select_node(state.node_registry, function_name)
         if not node_name:
-            raise HTTPException(status_code=503, detail="Nessun nodo disponibile.")
+            raise HTTPException(status_code=503, detail="Nessun nodo idoneo disponibile (potrebbe essere per RAM insufficiente).")
         execution_mode = metric_to_write.get("Execution Mode", "Unknown")
         return node_name, metric_to_write, execution_mode
