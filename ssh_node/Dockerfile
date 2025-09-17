@@ -25,6 +25,7 @@ RUN sed -i 's/ChallengeResponseAuthentication yes/ChallengeResponseAuthenticatio
 EXPOSE 22
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 CMD ["/usr/local/bin/entrypoint.sh"]

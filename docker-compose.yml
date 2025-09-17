@@ -28,6 +28,11 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: '512M'
     healthcheck:
       test: ["CMD", "sshpass", "-p", "sshpassword", "ssh", "-o", "StrictHostKeyChecking=no", "sshuser@localhost", "exit"]
       interval: 10s
@@ -44,6 +49,11 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: '512M'
     healthcheck:
       test: ["CMD", "sshpass", "-p", "sshpassword", "ssh", "-o", "StrictHostKeyChecking=no", "sshuser@localhost", "exit"]
       interval: 10s
@@ -60,6 +70,11 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: '512M'
     healthcheck:
       test: ["CMD", "sshpass", "-p", "sshpassword", "ssh", "-o", "StrictHostKeyChecking=no", "sshuser@localhost", "exit"]
       interval: 10s
@@ -76,6 +91,11 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: '512M'
     healthcheck:
       test: ["CMD", "sshpass", "-p", "sshpassword", "ssh", "-o", "StrictHostKeyChecking=no", "sshuser@localhost", "exit"]
       interval: 10s
