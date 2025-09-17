@@ -70,10 +70,10 @@ async def main():
         register_node(service_name, service_name, constants.USER, constants.PASSWORD, port=22)
     
     func_name_small = "fibonacci-image-big-func-small"
-    register_function(func_name_small, constants.DOCKER_IMAGE_HEAVY, constants.COMMAND)
+    register_function(func_name_small, constants.DOCKER_IMAGE_HEAVY, constants.COMMAND_LIGHT)
 
     func_name_big = "fibonacci-image-small-func-big"
-    register_function(func_name_big, constants.DOCKER_IMAGE_LIGHT, constants.COMMAND)
+    register_function(func_name_big, constants.DOCKER_IMAGE_LIGHT, constants.COMMAND_HEAVY)
 
     tasks_to_run = []
     for _ in range(constants.INVOCATIONS):
