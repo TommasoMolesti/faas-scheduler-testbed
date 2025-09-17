@@ -1,5 +1,5 @@
-DOCKER_IMAGE_HEAVY = "tommasomolesti/custom_python_heavy:v6"
-DOCKER_IMAGE_LIGHT = "tommasomolesti/custom_python_light:v1"
+DOCKER_IMAGE_HEAVY = "tommasomolesti/custom_python_heavy:v7"
+DOCKER_IMAGE_LIGHT = "tommasomolesti/custom_python_light:v2"
 
 BASE_URL = "http://api_gateway:8000"
 
