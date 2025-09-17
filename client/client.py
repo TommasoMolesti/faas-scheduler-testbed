@@ -54,7 +54,7 @@ async def async_invoke_function(client: httpx.AsyncClient, function_name: str, t
     """Invia una singola richiesta di invocazione in modo asincrono."""
     url = f"{constants.BASE_URL}/functions/invoke/{function_name}"
     try:
-        response = await client.post(url, timeout=300.0)
+        response = await client.post(url, timeout=None)
         response.raise_for_status()
     except httpx.HTTPStatusError as err:
         print(f"Errore HTTP per {function_name}: {err.response.status_code} - {err.response.text}")
