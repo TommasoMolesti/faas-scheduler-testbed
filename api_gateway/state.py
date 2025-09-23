@@ -9,5 +9,3 @@ CONTAINER_PREFIX = "faas-scheduler--"
 RESULTS_DIR = "/results"
 
 RAM_THRESHOLD = 90
-
-CONCURRENCY_LIMIT = 5

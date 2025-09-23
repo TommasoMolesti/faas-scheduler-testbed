@@ -3,8 +3,6 @@ import json
 import time
 import constants
 from typing import List
-import asyncio
-import httpx
 
 def register_function(name: str, image: str, command: str):
     """Registra una funzione sul gateway."""
@@ -50,22 +48,25 @@ def register_node(name: str, host: str, username: str, password: str, port: int 
     except Exception as err:
         print(f"Si è verificato un errore inatteso: {err}")
 
-async def async_invoke_function(client: httpx.AsyncClient, function_name: str, task_id: int):
+def invoke_function(function_name: str):
     """Invia una singola richiesta di invocazione in modo asincrono."""
     url = f"{constants.BASE_URL}/functions/invoke/{function_name}"
     try:
-        response = await client.post(url, timeout=None)
+        response = requests.post(url, timeout=None)
         response.raise_for_status()
-    except httpx.HTTPStatusError as err:
-        print(f"Errore HTTP per {function_name}: {err.response.status_code} - {err.response.text}")
-    except httpx.ReadTimeout:
-        print(f"Errore TIMEOUT per {function_name}: Il gateway non ha risposto in tempo.")
-    except httpx.ConnectError as err:
-        print(f"Errore di CONNESSIONE per {function_name}: Impossibile connettersi al gateway. Dettagli: {err}")
+    except requests.exceptions.HTTPError as err:
+        print(f"Errore HTTP durante l'invocazione della funzione '{function_name}': {err}")
+        try:
+            error_details = err.response.json()
+            print(f"Dettagli: {error_details}")
+        except json.JSONDecodeError:
+            print(f"Dettagli: {err.response.text}")
+    except requests.exceptions.ConnectionError as err:
+        print(f"Errore di connessione: Assicurati che il server FastAPI sia in esecuzione su {constants.BASE_URL}. Dettagli: {err}")
     except Exception as err:
-        print(f"Errore inatteso per {function_name} (Tipo: {type(err).__name__}): {err}")
+        print(f"Si è verificato un errore inatteso durante l'invocazione: {err}")
 
-async def main():
+if __name__ == "__main__":
     for service_name in constants.SSH_NODE_SERVICE_NAMES:
         register_node(service_name, service_name, constants.USER, constants.PASSWORD, port=22)
     
@@ -77,16 +78,6 @@ async def main():
 
     tasks_to_run = []
     for _ in range(constants.INVOCATIONS):
-        tasks_to_run.append(func_name_small)
-        tasks_to_run.append(func_name_big)
-    
-    async with httpx.AsyncClient() as client:
-        invocation_tasks = []
-        for i, func_name in enumerate(tasks_to_run):
-            task = asyncio.create_task(async_invoke_function(client, func_name, i+1))
-            invocation_tasks.append(task)
-        
-        await asyncio.gather(*invocation_tasks)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+        invoke_function(func_name_small)
+        time.sleep(1)
+        invoke_function(func_name_big)

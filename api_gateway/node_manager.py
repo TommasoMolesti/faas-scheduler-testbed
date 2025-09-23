@@ -7,7 +7,7 @@ from models import EXECUTION_MODES
 
 async def run_ssh_command(node_info: Dict[str, Any], command: str) -> str:
     """
-    Si connette a un nodo via SSH in modo asincrono ed esegue un comando.
+    Si connette a un nodo via SSH, esegue un comando e controlla l'esito.
     """
     try:
         async with asyncssh.connect(
@@ -17,12 +17,18 @@ async def run_ssh_command(node_info: Dict[str, Any], command: str) -> str:
             password=node_info["password"],
             known_hosts=None
         ) as conn:
-            result = await conn.run(command)
+            result = await conn.run(command, check=True)
             return result.stdout.strip()
+            
+    except asyncssh.ProcessError as e:
+        raise Exception(
+            f"Il comando sul nodo '{node_info['host']}' è fallito con exit code {e.returncode}.\n"
+            f"Stderr: {e.stderr.strip()}"
+        )
     except asyncssh.Error as e:
-        raise Exception(f"Errore SSH o del comando sul nodo '{node_info['host']}': {e}")
+        raise Exception(f"Errore di connessione SSH sul nodo '{node_info['host']}': {e}")
     except Exception as e:
-        raise Exception(f"Errore inatteso durante l'esecuzione SSH asincrona: {e}")
+        raise Exception(f"Errore inatteso durante l'esecuzione SSH: {e}")
 
 async def get_metrics_for_node(node_name: str, node_info: Dict[str, Any]) -> Optional[Dict[str, float]]:
     """Recupera e parsifica le metriche di CPU e RAM per un singolo nodo."""

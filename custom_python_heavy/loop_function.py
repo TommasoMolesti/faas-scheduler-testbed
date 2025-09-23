@@ -1,5 +1,7 @@
 import sys
 
+sys.set_int_max_str_digits(0)
+
 def handler(params, context):
     n = params["n"]
     return ''.join(fibonacci_nums(int(n)))
