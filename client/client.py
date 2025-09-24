@@ -79,5 +79,4 @@ if __name__ == "__main__":
     tasks_to_run = []
     for _ in range(constants.INVOCATIONS):
         invoke_function(func_name_small)
-        time.sleep(1)
         invoke_function(func_name_big)
