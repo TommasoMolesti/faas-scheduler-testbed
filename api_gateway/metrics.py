@@ -22,7 +22,7 @@ def write_metrics_files():
         df.to_csv(csv_output_path, index=False)
 
     except Exception as e:
-        print(f"Errore durante la scrittura dei file di metriche: {e}")
+        print(f"Error while writing metric files: {e}")
 
 async def log_invocation_metrics(metric_to_write, function_name, node_name, execution_mode, duration):
     if not metric_to_write:

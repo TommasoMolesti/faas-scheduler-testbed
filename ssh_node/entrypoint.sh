@@ -1,59 +1,59 @@
 #!/bin/bash
 # ssh_node/entrypoint.sh
 
-# Credenziali utente SSH
+# SSH user credentials
 USER="sshuser"
 PASSWORD="sshpassword"
 
-# 1. Crea l'utente SSH se non esiste e imposta la password
+# 1. Create the SSH user if it does not exist and set the password
 if ! id -u "$USER" >/dev/null 2>&1; then
     useradd -m -s /bin/bash "$USER"
 fi
 echo "$USER:$PASSWORD" | chpasswd
 
-# 2. Configurazione SSH
+# 2. SSH configuration
 sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config
 sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
 sed -i 's/UsePAM yes/UsePAM no/' /etc/ssh/sshd_config
 sed -i 's/ChallengeResponseAuthentication yes/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config
 
-# 3. Aggiungi l'utente al gruppo 'docker'
+# 3. Add the user to the ‘docker’ group
 usermod -aG docker "$USER"
 
-# Workaround per sudo
+# Workaround for sudo
 echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/docker" > /etc/sudoers.d/docker-access
 chmod 0440 /etc/sudoers.d/docker-access
 
-# 4. Crea lo script per recuperare le metriche (compatibile con cgroups v1 e v2)
+# 4. Create the script to retrieve metrics (compatible with cgroups v1 and v2)
 cat << 'EOF' > /usr/local/bin/get_node_metrics.sh
 #!/bin/bash
 
-# --- Rilevamento automatico della versione di Cgroups ---
+# --- Automatic detection of Cgroups version ---
 
-# Se questo file esiste, stiamo usando cgroups v2
+# If this file exists, we are using cgroups v2.
 if [ -f "/sys/fs/cgroup/cpu.stat" ]; then
-    # Calcolo CPU
-    # In v2, l'unità di misura è in microsecondi ('usage_usec')
+    # CPU calculation
+    # In v2, the unit of measurement is in microseconds ('usage_usec')
     cpu_usage_start=$(grep 'usage_usec' /sys/fs/cgroup/cpu.stat | awk '{print $2}')
     time_start=$(date +%s%N)
     sleep 0.1
     cpu_usage_end=$(grep 'usage_usec' /sys/fs/cgroup/cpu.stat | awk '{print $2}')
     time_end=$(date +%s%N)
 
-    cpu_delta=$((cpu_usage_end - cpu_usage_start))   # Delta in microsecondi
-    time_delta=$((time_end - time_start))           # Delta in nanosecondi
+    cpu_delta=$((cpu_usage_end - cpu_usage_start))   # Delta in microseconds
+    time_delta=$((time_end - time_start))           # Delta in nanoseconds
 
-    # Convertiamo il delta della CPU in nanosecondi per avere la stessa unità di misura del tempo
-    # e poi calcoliamo la percentuale.
+    # We convert the CPU delta into nanoseconds to have the same unit of measurement for time
+    # and then calculate the percentage.
     cpu_usage=$(awk -v cpu_delta_us="$cpu_delta" -v time_delta_ns="$time_delta" \
         'BEGIN { printf "%.2f", ((cpu_delta_us * 1000) / time_delta_ns) * 100 }')
 
-    # Calcolo RAM
-    # In v2, i file si chiamano 'memory.current' e 'memory.max'
+    # RAM calculation
+    # In v2, the files are called 'memory.current' and 'memory.max'
     mem_usage_bytes=$(cat /sys/fs/cgroup/memory.current)
     mem_limit_bytes=$(cat /sys/fs/cgroup/memory.max)
 
-    # Se non c'è limite, il file 'memory.max' contiene la stringa "max"
+    # If there is no limit, the file 'memory.max' contains the string “max”.
     if [ "$mem_limit_bytes" = "max" ]; then
         ram_usage="0.00"
     else
@@ -63,8 +63,8 @@ if [ -f "/sys/fs/cgroup/cpu.stat" ]; then
 else
     # --- (Fallback) ---
 
-    # Calcolo CPU
-    # In v1, l'unità è in nanosecondi ('cpuacct.usage')
+    # CPU calculation
+    # In v1, the unit is in nanoseconds ('cpuacct.usage')
     cpu_usage_start=$(cat /sys/fs/cgroup/cpuacct/cpuacct.usage)
     time_start=$(date +%s%N)
     sleep 0.1
@@ -77,8 +77,8 @@ else
     cpu_usage=$(awk -v cpu_delta_ns="$cpu_delta" -v time_delta_ns="$time_delta" \
         'BEGIN { printf "%.2f", (cpu_delta_ns / time_delta_ns) * 100 }')
 
-    # Calcolo RAM
-    # In v1, i file si chiamano 'memory.usage_in_bytes' e 'memory.limit_in_bytes'
+    # RAM calculation
+    # In v1, the files are called 'memory.usage_in_bytes' and 'memory.limit_in_bytes'
     mem_usage_bytes=$(cat /sys/fs/cgroup/memory/memory.usage_in_bytes)
     mem_limit_bytes=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes)
     
@@ -93,10 +93,10 @@ echo "  \"ram_usage\": \"$ram_usage\""
 echo "}"
 EOF
 
-# Rendi lo script eseguibile
+# Make the script executable
 chmod +x /usr/local/bin/get_node_metrics.sh
 
 echo "Nodo SSH pronto"
 
-# 5. Avvia il servizio SSH in foreground
+# 5. Start the SSH service in the foreground
 exec /usr/sbin/sshd -D

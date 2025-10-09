@@ -3,8 +3,8 @@ import sys
 
 def run_command(command, stream_output=False):
     """
-    Esegue un comando di shell. Se stream_output è True, l'output viene
-    mostrato in tempo reale. Altrimenti, viene catturato e mostrato alla fine.
+    Executes a shell command. If stream_output is True, the output is
+    displayed in real time. Otherwise, it is captured and displayed at the end.
     """
     try:
         if stream_output:
@@ -19,4 +19,4 @@ def run_command(command, stream_output=False):
             )
         
     except subprocess.CalledProcessError as e:
-        print(f"Errore durante l'esecuzione del comando.")
+        print(f"Error while executing the command.")

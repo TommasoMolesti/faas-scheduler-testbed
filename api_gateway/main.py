@@ -29,8 +29,8 @@ NODE_SELECTION_POLICY = policies.WarmedFirstPolicy()
 @app.on_event("startup")
 async def startup_event():
     """
-    All'avvio del server, controlla se esiste un file di metriche precedente,
-    se si carica i dati nella sessione corrente.
+    When the server starts, it checks whether a previous metrics file exists.
+    If it does, it loads the data into the current session.
     """
     csv_path = os.path.join(state.RESULTS_DIR, "metrics.csv")
     
@@ -41,12 +41,12 @@ async def startup_event():
             df_existing = pd.read_csv(csv_path)
             state.metrics_log.extend(df_existing.to_dict('records'))
         except Exception as e:
-            print(f"Attenzione: impossibile leggere il file di metriche esistente. Errore: {e}")
+            print(f"Warning: unable to read existing metrics file. Error: {e}")
 
 @app.post("/functions/register")
 async def register_function(req: models.RegisterFunctionRequest):
     if req.name in state.function_registry:
-        raise HTTPException(status_code=400, detail=f"Funzione '{req.name}' già registrata.")
+        raise HTTPException(status_code=400, detail=f"Function ‘{req.name}’ already registered.")
     state.function_registry[req.name] = {"image": req.image, "command": req.command}
     await SCHEDULING_POLICY.apply(WARMING_TYPE, req.name, DEFAULT_SCHEDULING_POLICY)
     return {"status": "success", "message": f"Function '{req.name}' registered."}
@@ -54,7 +54,7 @@ async def register_function(req: models.RegisterFunctionRequest):
 @app.post("/nodes/register")
 def register_node(req: models.RegisterNodeRequest):
     if req.name in state.node_registry:
-        raise HTTPException(status_code=400, detail=f"Nodo '{req.name}' già registrato.")
+        raise HTTPException(status_code=400, detail=f"Node '{req.name}' already registered.")
     state.node_registry[req.name] = {
         "host": req.host,
         "port": req.port,
@@ -67,9 +67,9 @@ def register_node(req: models.RegisterNodeRequest):
 async def invoke_function(function_name: str):
     start_time = time.perf_counter()
     if function_name not in state.function_registry:
-        raise HTTPException(status_code=404, detail=f"Funzione '{function_name}' non trovata.")
+        raise HTTPException(status_code=404, detail=f"Function '{function_name}' not found.")
     if not state.node_registry:
-        raise HTTPException(status_code=503, detail="Nessun nodo disponibile per l'esecuzione.")
+        raise HTTPException(status_code=503, detail="No nodes available for execution.")
 
     function_details = state.function_registry[function_name]
     
@@ -95,13 +95,13 @@ async def invoke_function(function_name: str):
                 cleanup_cmd = f"sudo docker rmi {image_name}"
                 await node_manager.run_ssh_command(node_info, cleanup_cmd)
             except Exception as e:
-                print(f"Impossibile rimuovere l'immagine dal nodo '{node_name} : {e}")
+                print(f"Unable to remove image from node '{node_name} : {e}")
 
     except Exception as e:
         end_time = time.perf_counter()
         duration = end_time - start_time
-        print(f"Invocazione fallita dopo {duration:.4f} secondi: {e}")
-        raise HTTPException(status_code=500, detail=f"Invocazione della funzione fallita: {e}")
+        print(f"Invocation failed after {duration:.4f} seconds: {e}")
+        raise HTTPException(status_code=500, detail=f"Invocation of the failed function: {e}")
 
     end_time = time.perf_counter()
     duration = end_time - start_time

@@ -7,7 +7,7 @@ RESULTS_DIR = "/results"
 INPUT_CSV_PATH = os.path.join(RESULTS_DIR, "metrics.csv")
 
 def generate_boxplot(df, function_name, order, color_map):
-    """Genera un box plot per una specifica funzione, usando un ordine e colori definiti."""
+    """Generate a box plot for a specific function, using a defined order and colors."""
     output_file = os.path.join(RESULTS_DIR, f"metrics_boxplot_{function_name}.png")
     try:
         df['Execution Time (s)'] = pd.to_numeric(df['Execution Time (s)'])
@@ -20,19 +20,19 @@ def generate_boxplot(df, function_name, order, color_map):
                     order=order,
                     hue='Execution Mode', legend=False, ax=ax)
         
-        ax.set_title(f'Distribuzione Tempi di Esecuzione - Funzione: {function_name}', fontsize=16, pad=20)
-        ax.set_xlabel('Strategia di Esecuzione', fontsize=12)
-        ax.set_ylabel('Tempo di Esecuzione (s)', fontsize=12)
+        ax.set_title(f'Distribution of Execution Times - Function: {function_name}', fontsize=16, pad=20)
+        ax.set_xlabel('Execution Strategy', fontsize=12)
+        ax.set_ylabel('Execution Time (s)', fontsize=12)
         fig.subplots_adjust(bottom=0.2) 
 
         plt.savefig(output_file)
         plt.close(fig)
-        print(f"✅ Box plot salvato in: {output_file}")
+        print(f"✅ Box plot saved in: {output_file}")
     except Exception as e:
-        print(f"❌ Errore durante la generazione del box plot per {function_name}: {e}")
+        print(f"❌ Error generating box plot for {function_name}: {e}")
 
 def generate_barchart(df, function_name, order, color_map):
-    """Genera un grafico a barre per una specifica funzione, usando un ordine e colori definiti."""
+    """Generate a bar chart for a specific function, using a defined order and colors."""
     output_file = os.path.join(RESULTS_DIR, f"metrics_barchart_{function_name}.png")
     try:
         df['Execution Time (s)'] = pd.to_numeric(df['Execution Time (s)'])
@@ -48,24 +48,24 @@ def generate_barchart(df, function_name, order, color_map):
         
         mean_times.loc[valid_order].plot(kind='bar', ax=ax, color=bar_colors, rot=0)
         
-        ax.set_title(f'Confronto Tempo Medio di Esecuzione - Funzione: {function_name}', fontsize=16, pad=20)
-        ax.set_xlabel('Strategia di Esecuzione', fontsize=12)
-        ax.set_ylabel('Tempo Medio di Esecuzione (s)', fontsize=12)
+        ax.set_title(f'Average Execution Time Comparison - Function: {function_name}', fontsize=16, pad=20)
+        ax.set_xlabel('Execution Strategy', fontsize=12)
+        ax.set_ylabel('Average Execution Time (s)', fontsize=12)
         
         if hasattr(ax, 'containers') and ax.containers:
              ax.bar_label(ax.containers[0], fmt='%.4f')
              
         plt.savefig(output_file)
         plt.close(fig)
-        print(f"✅ Bar chart salvato in: {output_file}")
+        print(f"✅ Bar chart saved in: {output_file}")
     except Exception as e:
-        print(f"❌ Errore durante la generazione del bar chart per {function_name}: {e}")
+        print(f"❌ Error generating bar chart for {function_name}: {e}")
 
 if __name__ == "__main__":
     if not os.path.exists(INPUT_CSV_PATH):
-        print(f"❌ Errore: File di dati non trovato in '{INPUT_CSV_PATH}'.")
+        print(f"❌ Error: Data file not found in '{INPUT_CSV_PATH}'.")
     else:
-        print(f"Leggo i dati da '{INPUT_CSV_PATH}'...")
+        print(f"I read the data from '{INPUT_CSV_PATH}'...")
         dataframe = pd.read_csv(INPUT_CSV_PATH)
         
         all_modes = dataframe['Execution Mode'].unique()
@@ -84,4 +84,4 @@ if __name__ == "__main__":
                 generate_boxplot(df_func_filtered, func_name, ordered_modes, color_map)
                 generate_barchart(df_func_filtered, func_name, ordered_modes, color_map)
             else:
-                print(f"ℹ️ Nessun dato trovato per la funzione '{func_name}'. Grafici saltati.")
+                print(f"ℹ️ No data found for the function ‘{func_name}’. Graphs skipped.")

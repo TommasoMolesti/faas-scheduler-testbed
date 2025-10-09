@@ -5,12 +5,12 @@ RESULTS_DIR = "results"
 
 def clean_results_directory():
     """
-    Rimuove tutti i file e le sottocartelle all'interno della cartella 'results',
-    se questa esiste. Funziona su qualsiasi sistema operativo.
+    Removes all files and subfolders within the 'results' folder,
+    if it exists. Works on any operating system.
     """
 
     if not os.path.isdir(RESULTS_DIR):
-        print(f"La cartella '{RESULTS_DIR}' non esiste. Nessuna operazione necessaria.")
+        print(f"The folder '{RESULTS_DIR}' does not exist. No action is required.")
         return
     
     for item_name in os.listdir(RESULTS_DIR):
@@ -22,9 +22,9 @@ def clean_results_directory():
             elif os.path.isdir(item_path):
                 shutil.rmtree(item_path)
         except Exception as e:
-            print(f"Errore durante la rimozione di {item_path}. Causa: {e}")
+            print(f"Error while removing {item_path}. Cause: {e}")
     
-    print("\n✅ Pulizia della cartella 'results' completata.")
+    print("\n✅ Cleaning of the 'results' folder completed.")
 
 if __name__ == "__main__":
     clean_results_directory()

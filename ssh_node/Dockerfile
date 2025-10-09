@@ -2,8 +2,8 @@ FROM ubuntu:latest
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Installa OpenSSH Server, curl (per healthcheck), sshpass (per healthcheck)
-# e il pacchetto docker.io che include il client Docker CLI e il gruppo 'docker'.
+# Install OpenSSH Server, curl (for healthcheck), sshpass (for healthcheck)
+# and the docker.io package, which includes the Docker CLI client and the ‘docker’ group.
 RUN apt-get update && apt-get install -y \
     openssh-server \
     curl \
@@ -12,10 +12,10 @@ RUN apt-get update && apt-get install -y \
     docker.io \
     && rm -rf /var/lib/apt/lists/*
 
-# Crea la directory per SSH e imposta i permessi
+# Create the directory for SSH and set the permissions
 RUN mkdir /var/run/sshd
 
-# Configurazione SSH: Imposta una password per l'utente root
+# SSH Configuration: Set a password for the root user
 RUN echo 'root:password' | chpasswd
 RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config
 RUN sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config

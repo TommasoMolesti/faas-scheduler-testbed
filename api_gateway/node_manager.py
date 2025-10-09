@@ -7,7 +7,7 @@ from models import EXECUTION_MODES
 
 async def run_ssh_command(node_info: Dict[str, Any], command: str) -> str:
     """
-    Si connette a un nodo via SSH, esegue un comando e controlla l'esito.
+    Connects to a node via SSH, executes a command, and checks the outcome.
     """
     try:
         async with asyncssh.connect(
@@ -22,16 +22,16 @@ async def run_ssh_command(node_info: Dict[str, Any], command: str) -> str:
             
     except asyncssh.ProcessError as e:
         raise Exception(
-            f"Il comando sul nodo '{node_info['host']}' è fallito con exit code {e.returncode}.\n"
+            f"The command on node '{node_info['host']}' failed with exit code {e.returncode}.n"
             f"Stderr: {e.stderr.strip()}"
         )
     except asyncssh.Error as e:
-        raise Exception(f"Errore di connessione SSH sul nodo '{node_info['host']}': {e}")
+        raise Exception(f"SSH connection error on node '{node_info['host']}': {e}")
     except Exception as e:
-        raise Exception(f"Errore inatteso durante l'esecuzione SSH: {e}")
+        raise Exception(f"Unexpected error during SSH execution: {e}")
 
 async def get_metrics_for_node(node_name: str, node_info: Dict[str, Any]) -> Optional[Dict[str, float]]:
-    """Recupera e parsifica le metriche di CPU e RAM per un singolo nodo."""
+    """Retrieves and parses CPU and RAM metrics for a single node."""
     try:
         metrics_json = await run_ssh_command(node_info, "/usr/local/bin/get_node_metrics.sh")
         metrics = json.loads(metrics_json)
@@ -40,11 +40,11 @@ async def get_metrics_for_node(node_name: str, node_info: Dict[str, Any]) -> Opt
             "ram_usage": float(metrics.get("ram_usage", float('inf'))),
         }
     except Exception as e:
-        print(f"Attenzione: impossibile recuperare metriche per '{node_name}': {e}. Ignorato.")
+        print(f"Warning: Unable to retrieve metrics for '{node_name}': {e}. Ignored.")
         return None
 
 async def prewarm_function_on_node(function_name: str, node_name: str):
-    """Esegue un docker pull su node_name e aggiorna lo stato a pre-warmed"""
+    """Performs a docker pull on node_name and updates the status to pre-warmed."""
     if function_name not in state.function_registry or node_name not in state.node_registry:
         return
 
@@ -58,11 +58,11 @@ async def prewarm_function_on_node(function_name: str, node_name: str):
             state.function_state_registry[function_name] = {}
         state.function_state_registry[function_name][node_name] = EXECUTION_MODES.PRE_WARMED.value
     except Exception as e:
-        print(f"Errore durante il pre-warm di '{function_name}' su '{node_name}': {e}")
+        print(f"Error during pre-warm of '{function_name}' on '{node_name}': {e}")
 
 
 async def warmup_function_on_node(function_name: str, node_name: str):
-    """Avvia un container in background su node_name e aggiorna lo stato a warmed"""
+    """Start a container in the background on node_name and update the status to warmed"""
     if function_name not in state.function_registry or node_name not in state.node_registry:
         return
 
@@ -78,4 +78,4 @@ async def warmup_function_on_node(function_name: str, node_name: str):
             state.function_state_registry[function_name] = {}
         state.function_state_registry[function_name][node_name] = EXECUTION_MODES.WARMED.value
     except Exception as e:
-        print(f"Errore durante il warm-up di '{function_name}' su '{node_name}': {e}")
+        print(f"Error during warm-up of '{function_name}' on '{node_name}': {e}")

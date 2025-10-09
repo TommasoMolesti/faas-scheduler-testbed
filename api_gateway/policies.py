@@ -34,12 +34,12 @@ class RoundRobinPolicy:
                     metric_entry = {"Function": function_name, "Node": selected_node, "CPU Usage %": cpu_usage, "RAM Usage %": ram_usage, "Execution Mode": f"Round Robin - {EXECUTION_MODES.COLD.label}"}
                     return selected_node, metric_entry
                 else:
-                    print(f"Attenzione (Round Robin): Nodo '{selected_node}' scartato per RAM > {state.RAM_THRESHOLD}%.")
+                    print(f"Warning (Round Robin): Node '{selected_node}' discarded because RAM > {state.RAM_THRESHOLD}%.")
 
             except StopIteration:
                 return None, None
         
-        print("Attenzione (Round Robin): Nessun nodo disponibile con RAM sufficiente.")
+        print("Warning (Round Robin): No nodes available with sufficient RAM.")
         return None, None
 
 class LeastUsedPolicy:
@@ -54,7 +54,7 @@ class LeastUsedPolicy:
         
         all_node_metrics = await self._get_all_node_metrics(nodes)
         if not all_node_metrics:
-            print("Least Used: Impossibile recuperare le metriche da alcun nodo.")
+            print("Least Used: Unable to retrieve metrics from any node.")
             return None, None
         
         eligible_nodes = {
@@ -63,7 +63,7 @@ class LeastUsedPolicy:
         }
 
         if not eligible_nodes:
-            print(f"Attenzione (Least Used): Nessun nodo disponibile con RAM < {state.RAM_THRESHOLD}%.")
+            print(f"Warning (Least Used): No nodes available with RAM < {state.RAM_THRESHOLD}%.")
             return None, None
 
         selected_node = min(eligible_nodes, key=lambda n: eligible_nodes[n]["cpu_usage"])
@@ -85,7 +85,7 @@ class MostUsedPolicy:
         
         all_node_metrics = await self._get_all_node_metrics(nodes)
         if not all_node_metrics:
-            print("Most Used: Impossibile recuperare le metriche da alcun nodo.")
+            print("Most Used: Unable to retrieve metrics from any node.")
             return None, None
         
         eligible_nodes = {
@@ -94,7 +94,7 @@ class MostUsedPolicy:
         }
 
         if not eligible_nodes:
-            print(f"Attenzione (Most Used): Nessun nodo disponibile con RAM < {state.RAM_THRESHOLD}%.")
+            print(f"Warning (Most Used): No nodes available with RAM < {state.RAM_THRESHOLD}%.")
             return None, None
 
         selected_node = max(eligible_nodes, key=lambda n: eligible_nodes[n]["cpu_usage"])
@@ -133,6 +133,6 @@ class DefaultColdPolicy:
     async def select_node(self, function_name: str, scheduler):
         node_name, metric_to_write = await scheduler.select_node(state.node_registry, function_name)
         if not node_name:
-            raise HTTPException(status_code=503, detail="Nessun nodo idoneo disponibile (potrebbe essere per RAM insufficiente).")
+            raise HTTPException(status_code=503, detail="No suitable nodes available (this may be due to insufficient RAM).")
         execution_mode = metric_to_write.get("Execution Mode", "Unknown")
         return node_name, metric_to_write, execution_mode
