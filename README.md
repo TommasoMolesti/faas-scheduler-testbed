@@ -10,7 +10,7 @@ The entire system is containerized using Docker and orchestrated via Docker Comp
 
   
 
->  **Note**: The full thesis that describes the design, implementation, and results in detail is available in this repository: `faas-scheduler-thesis-molesti.pdf`
+>  **Note**: The full thesis that describes the design, implementation, and results in detail is available in this repository: `faas-scheduler-thesis.pdf`
 
   
 
